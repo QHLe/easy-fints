@@ -1,0 +1,13 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: python-fints-rest-wrapper
+    env_file:
+      - .env
+    ports:
+      - "9686:9686"
+    volumes:
+      - ./logs:/app/logs
+    restart: unless-stopped
