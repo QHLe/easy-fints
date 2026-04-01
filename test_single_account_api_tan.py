@@ -16,9 +16,11 @@ from api_tan_test_helper import (
 def main() -> int:
     load_dotenv_file()
 
-    base_url = os.getenv("PYFIN_API_BASE_URL", "http://127.0.0.1:8000")
+    base_url = "http://127.0.0.1:8000"
     account_filter = require_env("FINTS_ACCOUNT_FILTER")
     days = int(os.getenv("FINTS_TX_DAYS", "30"))
+    date_from = os.getenv("FINTS_TX_DATE_FROM")
+    date_to = os.getenv("FINTS_TX_DATE_TO")
     tx_count_days = int(os.getenv("FINTS_BALANCE_TX_COUNT_DAYS", "14"))
 
     common_payload = {
@@ -48,7 +50,9 @@ def main() -> int:
         f"{base_url.rstrip('/')}/transactions",
         {
             **common_payload,
-            "days": days,
+            **({"date_from": date_from} if date_from else {}),
+            **({"date_to": date_to} if date_to else {}),
+            **({} if date_from else {"days": days}),
         },
     )
 

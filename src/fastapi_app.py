@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime as dt
 import os
 import uuid
 from collections.abc import Callable
@@ -15,14 +16,27 @@ from .client import PyFinIntegrationClient
 from .diagnostics import summarize_last_bank_response
 from .exceptions import FinTSConfigError, FinTSOperationError, TanRequiredError
 from .helpers import append_operation_step_log
+from .models import (
+    AccountSummaryResponseModel,
+    AccountTransactionsResponseModel,
+    FinTSErrorResponseModel,
+    HealthResponseModel,
+    NotFoundResponseModel,
+    TanRequiredResponseModel,
+    UnknownOperationResponseModel,
+)
 
 
 app = FastAPI()
 
 # In-memory TAN sessions: session_id -> dict with keys 'client','operation','params','created_at'
 SESSIONS: dict[str, dict[str, Any]] = {}
-SESSION_TTL = int(os.getenv("PYFIN_SESSION_TTL", "300"))  # seconds
+SESSION_TTL = 300  # seconds
 OperationHandler = Callable[[PyFinIntegrationClient, dict[str, Any]], Any]
+COMMON_ERROR_RESPONSES = {
+    409: {"model": TanRequiredResponseModel, "description": "TAN challenge required"},
+    502: {"model": FinTSErrorResponseModel, "description": "FinTS/provider error"},
+}
 
 
 def _session_response(status_code: int, **content: Any) -> JSONResponse:
@@ -57,13 +71,28 @@ def _create_session(client: PyFinIntegrationClient, operation: str, params: dict
     return sid
 
 
-@app.get("/health")
+@app.get("/health", response_model=HealthResponseModel)
 def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
-def _env_path_from_payload(payload: dict[str, Any]) -> str | None:
-    return payload.get("env_path") if payload.get("env_path") is not None else None
+def _api_config_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    cfg = dict(payload.get("config") or {})
+    cfg.pop("product_id", None)
+    cfg.pop("product_name", None)
+    cfg.pop("product_version", None)
+    cfg.pop("tan_mechanism", None)
+    cfg.pop("tan_mechanism_before_bootstrap", None)
+    return cfg
+
+
+def _optional_iso_date(value: Any, field_name: str) -> dt.date | None:
+    if value in (None, ""):
+        return None
+    try:
+        return dt.date.fromisoformat(str(value))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=f"invalid {field_name}: expected YYYY-MM-DD") from exc
 
 
 def _handle_client_operation(
@@ -75,10 +104,10 @@ def _handle_client_operation(
 ):
     _prune_sessions()
     client: PyFinIntegrationClient | None = None
-    cfg = payload.get("config") or {}
+    cfg = _api_config_from_payload(payload)
 
     try:
-        client = PyFinIntegrationClient.from_env(_env_path_from_payload(payload), overrides=cfg)
+        client = PyFinIntegrationClient.from_env(overrides=cfg)
         result = handler(client, params)
         return [item.to_dict() for item in result]
     except TanRequiredError as exc:
@@ -105,7 +134,7 @@ def _handle_client_operation(
 
 
 def _accounts_handler(client: PyFinIntegrationClient, params: dict[str, Any]):
-    return client.begin_accounts(account_filter=params.get("account_filter"))
+    return client.begin_accounts()
 
 
 def _balance_handler(client: PyFinIntegrationClient, params: dict[str, Any]):
@@ -119,6 +148,8 @@ def _transactions_handler(client: PyFinIntegrationClient, params: dict[str, Any]
     return client.list_transactions_by_account(
         account_filter=params.get("account_filter"),
         days=params["days"],
+        date_from=params.get("date_from"),
+        date_to=params.get("date_to"),
     )
 
 
@@ -129,18 +160,18 @@ OPERATION_HANDLERS: dict[str, OperationHandler] = {
 }
 
 
-@app.post("/accounts")
+@app.post("/accounts", response_model=list[AccountSummaryResponseModel], responses=COMMON_ERROR_RESPONSES)
 def accounts(payload: dict[str, Any]):
     """Return list of accounts. If operation requires TAN, return 409 with challenge."""
     return _handle_client_operation(
         payload,
         operation="accounts",
-        params={"account_filter": payload.get("account_filter")},
+        params={},
         handler=OPERATION_HANDLERS["accounts"],
     )
 
 
-@app.post("/balance")
+@app.post("/balance", response_model=list[AccountSummaryResponseModel], responses=COMMON_ERROR_RESPONSES)
 def balance(payload: dict[str, Any]):
     return _handle_client_operation(
         payload,
@@ -153,20 +184,35 @@ def balance(payload: dict[str, Any]):
     )
 
 
-@app.post("/transactions")
+@app.post("/transactions", response_model=list[AccountTransactionsResponseModel], responses=COMMON_ERROR_RESPONSES)
 def transactions(payload: dict[str, Any]):
+    date_from = _optional_iso_date(payload.get("date_from"), "date_from")
+    date_to = _optional_iso_date(payload.get("date_to"), "date_to")
+    if date_from is not None and date_to is not None and date_from > date_to:
+        raise HTTPException(status_code=400, detail="invalid date window: date_from must be on or before date_to")
     return _handle_client_operation(
         payload,
         operation="transactions",
         params={
             "account_filter": payload.get("account_filter"),
             "days": int(payload.get("days", 30)),
+            "date_from": date_from,
+            "date_to": date_to,
         },
         handler=OPERATION_HANDLERS["transactions"],
     )
 
 
-@app.post("/submit-tan")
+@app.post(
+    "/submit-tan",
+    response_model=list[AccountSummaryResponseModel] | list[AccountTransactionsResponseModel],
+    responses={
+        404: {"model": NotFoundResponseModel, "description": "Session not found or expired"},
+        409: {"model": TanRequiredResponseModel, "description": "TAN challenge required"},
+        500: {"model": UnknownOperationResponseModel, "description": "Unknown session operation"},
+        502: {"model": FinTSErrorResponseModel, "description": "FinTS/provider error"},
+    },
+)
 def submit_tan(payload: dict[str, Any]):
     _prune_sessions()
     session_id = payload.get("session_id")

@@ -41,18 +41,6 @@ def build_config_payload() -> dict[str, Any]:
         "pin": require_env("FINTS_PIN"),
         "server": require_env("FINTS_SERVER"),
     }
-    customer_id = os.getenv("FINTS_CUSTOMER_ID")
-    if customer_id:
-        payload["customer_id"] = customer_id
-    product_id = os.getenv("FINTS_PRODUCT_ID")
-    if product_id:
-        payload["product_id"] = product_id
-    tan_mechanism = os.getenv("FINTS_TAN_MECHANISM")
-    if tan_mechanism:
-        payload["tan_mechanism"] = tan_mechanism
-    tan_mechanism_before_bootstrap = os.getenv("FINTS_TAN_MECHANISM_BEFORE_BOOTSTRAP")
-    if tan_mechanism_before_bootstrap:
-        payload["tan_mechanism_before_bootstrap"] = tan_mechanism_before_bootstrap
     return payload
 
 
@@ -80,13 +68,7 @@ def challenge_extension(mime_type: str | None) -> str:
     return mimetypes.guess_extension(mime_type) or ".bin"
 
 
-def should_save_challenge_images() -> bool:
-    return os.getenv("PYFIN_SAVE_CHALLENGE_IMAGES", "").strip().lower() in {"1", "true", "yes", "on"}
-
-
 def save_challenge_image(challenge: dict[str, Any], stem: str) -> Path | None:
-    if not should_save_challenge_images():
-        return None
     image_base64 = challenge.get("image_base64")
     if not image_base64:
         return None

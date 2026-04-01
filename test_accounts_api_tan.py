@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 import sys
 from api_tan_test_helper import build_config_payload, load_dotenv_file, post_json, print_json, submit_tan_flow
 
@@ -8,7 +7,7 @@ from api_tan_test_helper import build_config_payload, load_dotenv_file, post_jso
 def main() -> int:
     load_dotenv_file()
 
-    base_url = os.getenv("PYFIN_API_BASE_URL", "http://127.0.0.1:8000")
+    base_url = "http://127.0.0.1:8000"
     status, payload = post_json(
         f"{base_url.rstrip('/')}/accounts",
         {"config": build_config_payload()},

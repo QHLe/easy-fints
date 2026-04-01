@@ -14,6 +14,8 @@ Base URL:
 http://<host>:<port>
 ```
 
+All operation endpoints accept a `config` object. Request `config` values are merged with env defaults.
+
 ## Endpoints
 
 ### `GET /health`
@@ -34,14 +36,8 @@ Request body:
     "bank": "<BLZ>",
     "user": "<user>",
     "pin": "<pin>",
-    "server": "https://...",
-    "product_id": "<id>",
-    "customer_id": "<optional>",
-    "tan_mechanism": "942",
-    "tan_mechanism_before_bootstrap": true
-  },
-  "account_filter": null,
-  "env_path": null
+    "server": "https://..."
+  }
 }
 ```
 
@@ -62,12 +58,10 @@ Request body:
     "bank": "<BLZ>",
     "user": "<user>",
     "pin": "<pin>",
-    "server": "https://...",
-    "product_id": "<id>"
+    "server": "https://..."
   },
   "account_filter": null,
-  "include_transaction_count_days": 14,
-  "env_path": null
+  "include_transaction_count_days": 14
 }
 ```
 
@@ -88,14 +82,18 @@ Request body:
     "bank": "<BLZ>",
     "user": "<user>",
     "pin": "<pin>",
-    "server": "https://...",
-    "product_id": "<id>"
+    "server": "https://..."
   },
   "account_filter": null,
-  "days": 30,
-  "env_path": null
+  "date_from": "2026-03-01",
+  "date_to": "2026-03-31"
 }
 ```
+
+`/transactions` accepts either:
+
+- `days` for a rolling window ending today
+- `date_from` and optional `date_to` in `YYYY-MM-DD` format for an explicit window
 
 Responses:
 
@@ -153,7 +151,7 @@ Sessions are:
 
 - stored in memory
 - local to one process
-- expired after `PYFIN_SESSION_TTL` seconds, default `300`
+- expired after `300` seconds
 
 ## Data Shapes
 
@@ -227,6 +225,8 @@ Sessions are:
 ## Notes
 
 - Request `config` is merged with env-loaded defaults.
-- `tan_mechanism_before_bootstrap` accepts normal boolean-like values and is normalized internally.
+- `account_filter` is supported by `/balance` and `/transactions`, but not by `/accounts`.
+- API request `config` does not accept `product_id`, `product_name`, or `product_version`; keep those in env/default config only.
+- API request `config` does not accept `tan_mechanism` or `tan_mechanism_before_bootstrap`; if needed, keep those in env/default config only.
 - For multi-worker or multi-container deployments, replace the in-memory TAN session store with a shared store.
 - Protect the API with authentication and TLS before exposing it outside a trusted environment.

@@ -6,6 +6,8 @@ import base64
 from dataclasses import asdict, dataclass
 from typing import Any, Optional
 
+from pydantic import BaseModel
+
 from .helpers import account_label, load_config
 
 
@@ -25,11 +27,8 @@ class FinTSConfig:
     server: str
     product_id: str
     bank: Optional[str] = None
-    customer_id: Optional[str] = None
-    tan_medium: Optional[str] = None
     product_name: Optional[str] = None
     product_version: Optional[str] = None
-    system_id: Optional[str] = None
     tan_mechanism: Optional[str] = None
     tan_mechanism_before_bootstrap: bool = False
 
@@ -274,7 +273,6 @@ class StoredSepaProfile:
     profile_id: str
     server: str
     display_name: Optional[str] = None
-    tan_medium: Optional[str] = None
     current_tan_method: Optional[str] = None
     current_tan_method_name: Optional[str] = None
     tan_methods: list[dict[str, Any]] | None = None
@@ -286,7 +284,6 @@ class StoredSepaProfile:
             "profile_id": self.profile_id,
             "server": self.server,
             "display_name": self.display_name,
-            "tan_medium": self.tan_medium,
             "current_tan_method": self.current_tan_method,
             "current_tan_method_name": self.current_tan_method_name,
             "tan_methods": self.tan_methods,
@@ -300,7 +297,6 @@ class StoredSepaProfile:
             profile_id=data["profile_id"],
             server=data["server"],
             display_name=data.get("display_name"),
-            tan_medium=data.get("tan_medium"),
             current_tan_method=data.get("current_tan_method"),
             current_tan_method_name=data.get("current_tan_method_name"),
             tan_methods=data.get("tan_methods"),
@@ -314,7 +310,6 @@ class StoredSepaProfile:
         *,
         user_id: str,
         pin: str,
-        customer_id: Optional[str] = None,
         overrides: Optional[dict[str, Any]] = None,
     ) -> dict[str, Any]:
         cfg = {
@@ -323,9 +318,77 @@ class StoredSepaProfile:
             "pin": pin,
             "server": self.server,
             "product_id": bank_info.product_id,
-            "customer_id": customer_id,
-            "tan_medium": self.tan_medium,
         }
         if overrides:
             cfg.update({key: value for key, value in overrides.items() if value is not None})
         return cfg
+
+
+class HealthResponseModel(BaseModel):
+    status: str
+
+
+class AccountSummaryResponseModel(BaseModel):
+    label: str
+    iban: Optional[str]
+    bic: Optional[str]
+    bank_code: Optional[str]
+    account_number: Optional[str]
+    subaccount_number: Optional[str]
+    bank_identifier: Optional[str]
+    balance: Optional[str] = None
+    transaction_count: Optional[int] = None
+    raw_repr: Optional[str] = None
+
+
+class TransactionRecordResponseModel(BaseModel):
+    account_label: str
+    tx_index: int
+    booking_date: Optional[str]
+    value_date: Optional[str]
+    amount: Optional[str]
+    currency: Optional[str]
+    counterparty_name: Optional[str]
+    counterparty_iban: Optional[str]
+    purpose: Optional[str]
+    raw: str
+
+
+class AccountTransactionsResponseModel(BaseModel):
+    account: AccountSummaryResponseModel
+    transactions: list[TransactionRecordResponseModel]
+
+
+class TanChallengeResponseModel(BaseModel):
+    message: Optional[str]
+    decoupled: bool
+    has_html: bool
+    has_raw: bool
+    has_matrix: bool
+    has_hhduc: bool
+    image_mime_type: Optional[str] = None
+    image_base64: Optional[str] = None
+
+
+class TanRequiredResponseModel(BaseModel):
+    error: str
+    session_id: str
+    operation: Optional[str] = None
+    message: Optional[str] = None
+    challenge: TanChallengeResponseModel
+
+
+class FinTSErrorResponseModel(BaseModel):
+    error: str
+    operation: str
+    message: str
+
+
+class NotFoundResponseModel(BaseModel):
+    error: str
+    message: str
+
+
+class UnknownOperationResponseModel(BaseModel):
+    error: str
+    message: str

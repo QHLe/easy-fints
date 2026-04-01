@@ -35,9 +35,6 @@ Priority legend
 
 1. Add a minimal API key auth dependency in `src/fastapi_app.py` (env var `API_KEY`) and protect all endpoints.
 2. Add `response_model` using small Pydantic models (or convert serializable dataclasses to pydantic) so `/docs` lists correct schema.
-3. Add unit tests for endpoints with a mocked `PyFinIntegrationClient` testing normal and TAN-required flows.
-4. Add a `Dockerfile` and `docker-compose.yml` that brings up app + Redis; implement Redis-backed sessions.
-5. Add a GitHub Actions workflow to run tests and linters.
 
 
 ## Decisions / questions (need your input)
@@ -69,8 +66,4 @@ Priority legend
 
 - PR 1: Add simple API key auth and wire it to all endpoints.
 - PR 2: Add basic Pydantic response models for account and transaction schemas and wire `response_model` into routes.
-- PR 3: Add unit tests for `/accounts` and `/transactions`, mocking `PyFinIntegrationClient`.
-- PR 4: Add a `Dockerfile` and `docker-compose.yml` (app + Redis) and switch sessions to Redis.
 
-
-If you want, I can start with PR 1 (API key auth) and PR 2 (OpenAPI models) — which should I implement first?

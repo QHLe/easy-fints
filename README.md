@@ -31,14 +31,6 @@ Create a minimal `.env`:
 FINTS_PRODUCT_ID=HBCI4Java
 FINTS_PRODUCT_NAME=HBCI4Java
 FINTS_PRODUCT_VERSION=3.0
-FINTS_BLZ=<bank_code>
-FINTS_USER=<user_id>
-FINTS_PIN=<pin>
-FINTS_SERVER=<bank_fints_url>
-FINTS_CUSTOMER_ID=<optional>
-FINTS_TAN_MECHANISM=
-FINTS_TAN_MECHANISM_BEFORE_BOOTSTRAP=0
-PYFIN_API_BASE_URL=http://127.0.0.1:8000
 ```
 
 Start the API:
@@ -52,35 +44,6 @@ OpenAPI docs will be available at:
 - `http://127.0.0.1:8000/docs`
 - `http://127.0.0.1:8000/openapi.json`
 
-Important:
-
-- use `src.fastapi_app:app`
-- do not use `src/fastapi_app:app`
-
-## Configuration
-
-The app loads `.env` from the repository root by default.
-
-You can point to another env file with:
-
-```bash
-FINTS_ENV_FILE=.env.commerzbank uvicorn src.fastapi_app:app --reload
-```
-
-Common config values used by the API:
-
-- `FINTS_PRODUCT_ID`: required if not provided in request `config`
-- `FINTS_PRODUCT_NAME`: optional
-- `FINTS_PRODUCT_VERSION`: optional
-- `FINTS_BLZ`: useful for helper scripts
-- `FINTS_USER`: useful for helper scripts
-- `FINTS_PIN`: useful for helper scripts
-- `FINTS_SERVER`: useful for helper scripts
-- `FINTS_CUSTOMER_ID`: optional
-- `FINTS_TAN_MECHANISM`: optional forced TAN mechanism
-- `FINTS_TAN_MECHANISM_BEFORE_BOOTSTRAP`: optional boolean-like flag (`1`, `true`, `yes`, `on`)
-- `PYFIN_SESSION_TTL`: TAN session lifetime in seconds, default `300`
-- `PYFIN_API_BASE_URL`: base URL used by the helper scripts
 
 ## API Overview
 
@@ -100,21 +63,15 @@ Supported `config` fields:
 - `user`
 - `pin`
 - `server`
-- `product_id`
-- `product_name`
-- `product_version`
-- `customer_id`
-- `tan_medium`
-- `system_id`
-- `tan_mechanism`
-- `tan_mechanism_before_bootstrap`
 
 Optional top-level request fields:
 
-- `account_filter`
 - `days`
+- `date_from`
+- `date_to`
 - `include_transaction_count_days`
-- `env_path`
+
+`account_filter` is supported by `/balance` and `/transactions`, but not by `/accounts`.
 
 ## Endpoint Examples
 
@@ -140,12 +97,8 @@ curl -sS -X POST http://127.0.0.1:8000/accounts \
       "bank": "<BLZ>",
       "user": "<user>",
       "pin": "<pin>",
-      "server": "https://bank.fints.server",
-      "product_id": "<product_id>",
-      "tan_mechanism": "942",
-      "tan_mechanism_before_bootstrap": true
-    },
-    "account_filter": null
+      "server": "https://bank.fints.server"
+    }
   }'
 ```
 
@@ -159,8 +112,7 @@ curl -sS -X POST http://127.0.0.1:8000/balance \
       "bank": "<BLZ>",
       "user": "<user>",
       "pin": "<pin>",
-      "server": "https://bank.fints.server",
-      "product_id": "<product_id>"
+      "server": "https://bank.fints.server"
     },
     "include_transaction_count_days": 14
   }'
@@ -176,12 +128,19 @@ curl -sS -X POST http://127.0.0.1:8000/transactions \
       "bank": "<BLZ>",
       "user": "<user>",
       "pin": "<pin>",
-      "server": "https://bank.fints.server",
-      "product_id": "<product_id>"
+      "server": "https://bank.fints.server"
     },
-    "days": 30
+    "account_filter": null,
+    "date_from": "2026-03-01",
+    "date_to": "2026-03-31"
   }'
 ```
+
+For `/transactions`, you can use either:
+
+- `account_filter` to restrict the response to one account
+- `days` for a rolling window ending today
+- `date_from` and optional `date_to` in `YYYY-MM-DD` format for an explicit window
 
 ## TAN Flow
 
@@ -308,8 +267,6 @@ Sensitive logging defaults:
 - operation logs under `logs/` are metadata-focused and avoid full account/transaction payloads
 
 You can explicitly enable raw message logging with `FINTS_ENABLE_RAW_MESSAGE_LOG=1`.
-You can explicitly enable challenge image saving with `PYFIN_SAVE_CHALLENGE_IMAGES=1`.
-
 ## Development
 
 Important files:

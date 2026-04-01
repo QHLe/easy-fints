@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime as dt
 import logging
 from typing import Any, Iterator, Optional
 
@@ -102,7 +103,6 @@ class PyFinIntegrationClient:
         *,
         user_id: str,
         pin: str,
-        customer_id: Optional[str] = None,
         sepa_profile: Optional[StoredSepaProfile] = None,
         overrides: Optional[dict[str, Any]] = None,
     ) -> "PyFinIntegrationClient":
@@ -111,7 +111,6 @@ class PyFinIntegrationClient:
                 bank_info,
                 user_id=user_id,
                 pin=pin,
-                customer_id=customer_id,
                 overrides=overrides,
             )
         else:
@@ -121,7 +120,6 @@ class PyFinIntegrationClient:
                 "pin": pin,
                 "server": bank_info.server,
                 "product_id": bank_info.product_id,
-                "customer_id": customer_id,
             }
             if overrides:
                 cfg.update({key: value for key, value in overrides.items() if value is not None})
@@ -468,6 +466,25 @@ class PyFinIntegrationClient:
         ) or []
         return [normalize_transaction(transaction) for transaction in raw_transactions]
 
+    def _get_transactions_rows_for_window(
+        self,
+        client: Any,
+        account: Any,
+        *,
+        date_from: Optional[dt.date] = None,
+        date_to: Optional[dt.date] = None,
+        days: int = 30,
+    ) -> list[dict[str, Any]]:
+        start_date = date_from if date_from is not None else transaction_start_date(days)
+        raw_transactions = self._run(
+            "get_transactions",
+            client.get_transactions,
+            account,
+            start_date=start_date,
+            end_date=date_to,
+        ) or []
+        return [normalize_transaction(transaction) for transaction in raw_transactions]
+
     def list_accounts(self, account_filter: Optional[str] = None) -> list[AccountSummary]:
         with self._client_scope() as client:
             accounts = select_accounts(self._run("list_accounts", list_accounts, client), account_filter)
@@ -535,9 +552,16 @@ class PyFinIntegrationClient:
         *,
         account_filter: Optional[str] = None,
         days: int = 30,
+        date_from: Optional[dt.date] = None,
+        date_to: Optional[dt.date] = None,
     ) -> list[TransactionRecord]:
         records = []
-        for bundle in self.list_transactions_by_account(account_filter=account_filter, days=days):
+        for bundle in self.list_transactions_by_account(
+            account_filter=account_filter,
+            days=days,
+            date_from=date_from,
+            date_to=date_to,
+        ):
             records.extend(bundle.transactions)
         return records
 
@@ -546,6 +570,8 @@ class PyFinIntegrationClient:
         *,
         account_filter: Optional[str] = None,
         days: int = 30,
+        date_from: Optional[dt.date] = None,
+        date_to: Optional[dt.date] = None,
     ) -> list[AccountTransactions]:
         with self._client_scope() as client:
             append_operation_step_log(
@@ -554,6 +580,8 @@ class PyFinIntegrationClient:
                 {
                     "filter_applied": bool(account_filter),
                     "days": days,
+                    "date_from": serialize_value(date_from),
+                    "date_to": serialize_value(date_to),
                 },
             )
             accounts = select_accounts(self._run("list_accounts", list_accounts, client), account_filter)
@@ -567,7 +595,13 @@ class PyFinIntegrationClient:
                         "account_index": index,
                     },
                 )
-                rows = self._get_transactions_rows(client, account, days)
+                rows = self._get_transactions_rows_for_window(
+                    client,
+                    account,
+                    days=days,
+                    date_from=date_from,
+                    date_to=date_to,
+                )
                 transactions = [
                     TransactionRecord.from_row(label.label, index, row)
                     for index, row in enumerate(rows, start=1)
@@ -593,6 +627,8 @@ class PyFinIntegrationClient:
                 {
                     "filter_applied": bool(account_filter),
                     "days": days,
+                    "date_from": serialize_value(date_from),
+                    "date_to": serialize_value(date_to),
                     "account_count": len(bundles),
                     "transaction_count": sum(len(bundle.transactions) for bundle in bundles),
                 },

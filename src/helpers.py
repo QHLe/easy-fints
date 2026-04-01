@@ -80,13 +80,6 @@ def load_config(
     if "tan_mechanism_before_bootstrap" in cfg and cfg["tan_mechanism_before_bootstrap"] is not None:
         cfg["tan_mechanism_before_bootstrap"] = _as_bool(cfg["tan_mechanism_before_bootstrap"])
 
-    ignore_customer_id = _first_present(
-        (overrides or {}).get("ignore_customer_id") if overrides else None,
-        os.getenv("FINTS_IGNORE_CUSTOMER_ID"),
-    )
-    if str(ignore_customer_id) == "1":
-        cfg["customer_id"] = None
-
     # Only product_id is required when loading defaults from environment.
     if not cfg.get("product_id"):
         raise RuntimeError(
@@ -261,10 +254,7 @@ def create_client(cfg: dict[str, Any]) -> FinTS3PinTanClient:
     logger.info("Creating FinTS client for bank=%s user=%s server=%s", bank_identifier, cfg.get("user"), cfg.get("server"))
 
     # Build optional constructor kwargs and validate product_version length.
-    constructor_kwargs: dict[str, Any] = {
-        "customer_id": cfg.get("customer_id"),
-        "tan_medium": cfg.get("tan_medium"),
-    }
+    constructor_kwargs: dict[str, Any] = {}
     if cfg.get("product_id"):
         constructor_kwargs["product_id"] = cfg["product_id"]
     if cfg.get("product_version"):
@@ -272,8 +262,6 @@ def create_client(cfg: dict[str, Any]) -> FinTS3PinTanClient:
         if len(pv) > 5:
             raise RuntimeError("Invalid FINTS product_version: max length is 5 characters")
         constructor_kwargs["product_version"] = pv
-    if cfg.get("system_id"):
-        constructor_kwargs["system_id"] = cfg["system_id"]
 
     # Use positional construction to match the behavior of download_sepa.py
     client = FinTS3PinTanClient(
@@ -332,8 +320,6 @@ def bootstrap_client(
         "get_current_tan_mechanism",
         "fetch_tan_mechanisms",
         "get_tan_mechanisms",
-        "is_tan_media_required",
-        "get_tan_media",
     )
     if not all(hasattr(client, attr) for attr in required_attrs):
         return client
@@ -355,16 +341,6 @@ def bootstrap_client(
             list(methods_map.keys()),
         )
         return client
-
-    if client.selected_tan_medium is None and client.is_tan_media_required():
-        usage, media = client.get_tan_media()
-        logger.debug("TAN media found: %s (usage=%s)", media, usage)
-        if len(media) == 1:
-            client.set_tan_medium(media[0])
-        elif len(media) == 0:
-            client.selected_tan_medium = ""
-        else:
-            client.set_tan_medium(media[0])
     return client
 
 
