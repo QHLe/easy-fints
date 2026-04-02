@@ -47,13 +47,15 @@ OpenAPI docs will be available at:
 
 ## API Overview
 
-The API exposes four endpoints:
+The API exposes five endpoints:
 
 - `GET /health`
 - `POST /accounts`
 - `POST /balance`
 - `POST /transactions`
-- `POST /submit-tan`
+- `POST /transfer`
+- `POST /transfer/retry-with-name`
+- `POST /confirm`
 
 All operation endpoints accept a JSON body with a `config` object. The `config` values are merged with env defaults.
 
@@ -70,6 +72,17 @@ Optional top-level request fields:
 - `date_from`
 - `date_to`
 - `include_transaction_count_days`
+
+Transfer-specific top-level request fields:
+
+- `source_account`
+- `account_name`
+- `recipient_name`
+- `recipient_iban`
+- `recipient_bic`
+- `amount`
+- `purpose`
+- `endtoend_id`
 
 `account_filter` is supported by `/balance` and `/transactions`, but not by `/accounts`.
 
@@ -142,6 +155,40 @@ For `/transactions`, you can use either:
 - `days` for a rolling window ending today
 - `date_from` and optional `date_to` in `YYYY-MM-DD` format for an explicit window
 
+### Transfer
+
+```bash
+curl -sS -X POST http://127.0.0.1:8000/transfer \
+  -H "Content-Type: application/json" \
+  -d '{
+    "config": {
+      "bank": "<BLZ>",
+      "user": "<user>",
+      "pin": "<pin>",
+      "server": "https://bank.fints.server"
+    },
+    "source_account": "DE...",
+    "account_name": "Max Mustermann",
+    "recipient_name": "Acme GmbH",
+    "recipient_iban": "DE...",
+    "recipient_bic": "ABCDEFGHXXX",
+    "amount": "12.34",
+    "purpose": "Invoice 123",
+    "endtoend_id": "INV-123"
+  }'
+```
+
+For `/transfer` in the current V1 scope:
+
+- only a single immediate SEPA credit transfer is supported
+- `account_name` is required because `python-fints.simple_sepa_transfer(...)` expects the sender account holder name explicitly
+- `source_account` should usually be the source IBAN
+- `amount` must be between `0.01` and `999999999.99` with at most 2 decimal places
+- `purpose` currently accepts a conservative SEPA-safe character set: letters, digits, spaces, and `/ - ? : ( ) . , ' +`
+- recipient name and IBAN are not locally matched against each other; any real payee verification is bank-/channel-dependent
+
+If a payee-verification step returns a close/no match, you can start a new transfer flow with a corrected recipient name via `POST /transfer/retry-with-name` using the previous `session_id`.
+
 ## TAN Flow
 
 If a bank operation needs TAN confirmation, the endpoint returns HTTP `409`:
@@ -150,6 +197,8 @@ If a bank operation needs TAN confirmation, the endpoint returns HTTP `409`:
 {
   "error": "tan_required",
   "session_id": "<uuid>",
+  "state": "awaiting_tan",
+  "next_action": "provide_tan",
   "operation": "transactions",
   "message": "TAN confirmation required",
   "challenge": {
@@ -165,20 +214,23 @@ If a bank operation needs TAN confirmation, the endpoint returns HTTP `409`:
 }
 ```
 
-Submit the TAN with:
+Continue the flow with:
 
 ```bash
-curl -sS -X POST http://127.0.0.1:8000/submit-tan \
+curl -sS -X POST http://127.0.0.1:8000/confirm \
   -H "Content-Type: application/json" \
   -d '{"session_id":"<uuid>","tan":"123456"}'
 ```
 
-Possible `/submit-tan` responses:
+Possible `/confirm` responses:
 
 - `200`: original operation resumed successfully
+- `202`: decoupled/app confirmation is still pending
 - `409`: another TAN challenge is required
 - `404`: session was not found or expired
 - `502`: FinTS/provider error while resuming
+
+If `state` is `awaiting_decoupled`, confirm the operation in the banking app and call `/confirm` again. The legacy `/submit-tan` path remains available as an alias.
 
 Sessions are stored in memory only. They are not shared across multiple workers or containers.
 
@@ -280,12 +332,12 @@ Important files:
 Basic verification:
 
 ```bash
-python -m compileall src api_tan_test_helper.py test_accounts_api_tan.py test_balance_api_tan.py test_transactions_api_tan.py
+python -m compileall src api_tan_test_helper.py test_accounts_api_tan.py test_balance_api_tan.py test_transactions_api_tan.py test_single_account_api_tan.py test_transfer_api_tan.py
 ```
 
 ## Security Notes
 
 - Do not expose this API publicly without authentication and TLS.
 - Do not log or persist PINs and TANs outside controlled development needs.
-- `/submit-tan` uses in-memory session state and is suitable for a single-process deployment only.
+- `/confirm` uses in-memory session state and is suitable for a single-process deployment only.
 - For production, use a shared session store and carefully control worker ownership of FinTS dialogs.

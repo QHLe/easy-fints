@@ -87,31 +87,95 @@ def print_json(title: str, payload: Any) -> None:
 def submit_tan_flow(base_url: str, response_payload: dict[str, Any], *, challenge_stem: str) -> dict[str, Any]:
     session_id = response_payload.get("session_id")
     challenge = response_payload.get("challenge") or {}
+    vop = response_payload.get("vop") or {}
     if not session_id:
         raise RuntimeError("TAN response did not include session_id")
 
     print(f"Session ID: {session_id}")
     if challenge.get("message"):
         print(f"Challenge: {challenge['message']}")
+    if vop.get("message"):
+        print(f"Payee verification: {vop['message']}")
+    if vop.get("result"):
+        print(f"VoP result: {vop['result']}")
+    if vop.get("close_match_name"):
+        print(f"Close match name: {vop['close_match_name']}")
+    if vop.get("other_identification"):
+        print(f"Other identification: {vop['other_identification']}")
+    if vop.get("na_reason"):
+        print(f"VoP reason: {vop['na_reason']}")
 
     image_path = save_challenge_image(challenge, challenge_stem)
     if image_path is not None:
         print(f"Challenge image saved to: {image_path}")
 
     while True:
-        tan = input("Enter TAN and press Enter (blank submits empty TAN): ").strip()
+        state = response_payload.get("state")
+        request_payload = {"session_id": session_id}
+        if state == "awaiting_decoupled":
+            input("Press Enter after confirming in your banking app: ")
+            request_payload["tan"] = ""
+        elif state == "awaiting_vop":
+            decision = input("Approve payee verification, retry with corrected name, or abort? [y/r/N]: ").strip().lower()
+            if decision in {"r", "retry"}:
+                corrected_name = input("Enter corrected recipient name: ").strip()
+                status, payload = post_json(
+                    f"{base_url.rstrip('/')}/transfer/retry-with-name",
+                    {"session_id": session_id, "recipient_name": corrected_name},
+                )
+                if status == 200:
+                    return payload
+                if status not in (202, 409) or payload.get("error") not in {"tan_required", "confirmation_pending", "vop_required"}:
+                    raise RuntimeError(f"retry-with-name failed with status {status}: {json.dumps(payload)}")
+
+                response_payload = payload
+                session_id = payload.get("session_id", session_id)
+                challenge = payload.get("challenge") or {}
+                vop = payload.get("vop") or {}
+                print(f"New Session ID: {session_id}")
+                if challenge.get("message"):
+                    print(f"Next challenge: {challenge['message']}")
+                if vop.get("message"):
+                    print(f"Payee verification: {vop['message']}")
+                if vop.get("result"):
+                    print(f"VoP result: {vop['result']}")
+                if vop.get("close_match_name"):
+                    print(f"Close match name: {vop['close_match_name']}")
+                if vop.get("other_identification"):
+                    print(f"Other identification: {vop['other_identification']}")
+                if vop.get("na_reason"):
+                    print(f"VoP reason: {vop['na_reason']}")
+                continue
+            if decision not in {"y", "yes"}:
+                raise RuntimeError("Payee verification was not approved.")
+            request_payload["approve_vop"] = True
+        else:
+            tan = input("Enter TAN and press Enter (blank submits empty TAN): ").strip()
+            request_payload["tan"] = tan
         status, payload = post_json(
-            f"{base_url.rstrip('/')}/submit-tan",
-            {"session_id": session_id, "tan": tan},
+            f"{base_url.rstrip('/')}/confirm",
+            request_payload,
         )
         if status == 200:
             return payload
-        if status != 409 or payload.get("error") != "tan_required":
-            raise RuntimeError(f"submit-tan failed with status {status}: {json.dumps(payload)}")
+        if status not in (202, 409) or payload.get("error") not in {"tan_required", "confirmation_pending", "vop_required"}:
+            raise RuntimeError(f"confirm failed with status {status}: {json.dumps(payload)}")
 
+        response_payload = payload
         challenge = payload.get("challenge") or {}
+        vop = payload.get("vop") or {}
         if challenge.get("message"):
             print(f"Next challenge: {challenge['message']}")
+        if vop.get("message"):
+            print(f"Payee verification: {vop['message']}")
+        if vop.get("result"):
+            print(f"VoP result: {vop['result']}")
+        if vop.get("close_match_name"):
+            print(f"Close match name: {vop['close_match_name']}")
+        if vop.get("other_identification"):
+            print(f"Other identification: {vop['other_identification']}")
+        if vop.get("na_reason"):
+            print(f"VoP reason: {vop['na_reason']}")
         image_path = save_challenge_image(challenge, challenge_stem)
         if image_path is not None:
             print(f"Updated challenge image saved to: {image_path}")

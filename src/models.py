@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 from dataclasses import asdict, dataclass
+from decimal import Decimal
 from typing import Any, Optional
 
 from pydantic import BaseModel
@@ -178,6 +179,47 @@ class TanChallenge:
 
 
 @dataclass(slots=True)
+class VOPChallenge:
+    result: Optional[str]
+    message: Optional[str]
+    close_match_name: Optional[str] = None
+    other_identification: Optional[str] = None
+    na_reason: Optional[str] = None
+    raw_repr: Optional[str] = None
+
+    @classmethod
+    def from_response(cls, response: Any) -> "VOPChallenge":
+        vop_container = getattr(response, "vop_result", None)
+        single_result = getattr(vop_container, "vop_single_result", None) or getattr(response, "vop_single_result", None)
+        result = serialize_value(getattr(single_result, "result", None))
+        close_match_name = serialize_value(getattr(single_result, "close_match_name", None))
+        other_identification = serialize_value(getattr(single_result, "other_identification", None))
+        na_reason = serialize_value(getattr(single_result, "na_reason", None))
+
+        message = "Review payee verification result before continuing."
+        if result == "RVMC":
+            message = f"Recipient name partially matches: {close_match_name or 'close match reported by bank'}."
+        elif result == "RVNM":
+            message = "Recipient name does not match the IBAN according to the bank."
+        elif result == "RVNA":
+            message = f"Recipient name check not available: {na_reason or 'reason not provided'}."
+        elif result == "RCVC":
+            message = "Bank requires explicit approval of the payee verification result before execution."
+
+        return cls(
+            result=result,
+            message=message,
+            close_match_name=close_match_name,
+            other_identification=other_identification,
+            na_reason=na_reason,
+            raw_repr=repr(single_result or vop_container or response),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(slots=True)
 class TanMethod:
     code: str
     name: Optional[str]
@@ -202,6 +244,68 @@ class TanMethodsSnapshot:
             "methods": [method.to_dict() for method in self.methods],
             "media": self.media,
         }
+
+
+@dataclass(slots=True)
+class TransferResponse:
+    status: str
+    success: bool
+    reference: Optional[str]
+    amount: str
+    currency: str
+    source_account_label: str
+    recipient_name: str
+    recipient_iban: str
+    recipient_bic: Optional[str]
+    purpose: str
+    endtoend_id: str
+    bank_responses: list[dict[str, Any]]
+
+    @classmethod
+    def from_fints_response(
+        cls,
+        *,
+        response: Any,
+        amount: Decimal,
+        source_account_label: str,
+        recipient_name: str,
+        recipient_iban: str,
+        recipient_bic: Optional[str],
+        purpose: str,
+        endtoend_id: str,
+    ) -> "TransferResponse":
+        response_status = serialize_value(getattr(getattr(response, "status", None), "name", None)) or "UNKNOWN"
+        bank_responses = []
+        for item in getattr(response, "responses", []) or []:
+            bank_responses.append(
+                {
+                    "code": serialize_value(getattr(item, "code", None)),
+                    "message": serialize_value(getattr(item, "text", None)),
+                    "reference": serialize_value(getattr(item, "reference", None)),
+                }
+            )
+        reference = None
+        for item in bank_responses:
+            if item.get("reference"):
+                reference = item["reference"]
+                break
+        return cls(
+            status=response_status,
+            success=response_status not in {"ERROR", "UNKNOWN"},
+            reference=reference,
+            amount=f"{amount:.2f}",
+            currency="EUR",
+            source_account_label=source_account_label,
+            recipient_name=recipient_name,
+            recipient_iban=recipient_iban,
+            recipient_bic=recipient_bic,
+            purpose=purpose,
+            endtoend_id=endtoend_id,
+            bank_responses=bank_responses,
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
 
 
 @dataclass(slots=True)
@@ -370,12 +474,63 @@ class TanChallengeResponseModel(BaseModel):
     image_base64: Optional[str] = None
 
 
+class VOPChallengeResponseModel(BaseModel):
+    result: Optional[str]
+    message: Optional[str]
+    close_match_name: Optional[str] = None
+    other_identification: Optional[str] = None
+    na_reason: Optional[str] = None
+    raw_repr: Optional[str] = None
+
+
 class TanRequiredResponseModel(BaseModel):
     error: str
     session_id: str
+    state: Optional[str] = None
+    next_action: Optional[str] = None
     operation: Optional[str] = None
     message: Optional[str] = None
-    challenge: TanChallengeResponseModel
+    challenge: Optional[TanChallengeResponseModel] = None
+    vop: Optional[VOPChallengeResponseModel] = None
+
+
+class ConfirmationPendingResponseModel(BaseModel):
+    error: str
+    session_id: str
+    state: str
+    next_action: str
+    operation: Optional[str] = None
+    message: Optional[str] = None
+    challenge: Optional[TanChallengeResponseModel] = None
+    vop: Optional[VOPChallengeResponseModel] = None
+
+
+class ValidationErrorResponseModel(BaseModel):
+    error: str
+    operation: Optional[str] = None
+    field: Optional[str] = None
+    message: str
+
+
+class TransferBankResponseModel(BaseModel):
+    code: Optional[str]
+    message: Optional[str]
+    reference: Optional[str]
+
+
+class TransferResponseModel(BaseModel):
+    status: str
+    success: bool
+    reference: Optional[str]
+    amount: str
+    currency: str
+    source_account_label: str
+    recipient_name: str
+    recipient_iban: str
+    recipient_bic: Optional[str]
+    purpose: str
+    endtoend_id: str
+    bank_responses: list[TransferBankResponseModel]
 
 
 class FinTSErrorResponseModel(BaseModel):

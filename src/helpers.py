@@ -28,6 +28,9 @@ CONFIG_ENV_VARS = {
     "tan_mechanism_before_bootstrap": ("FINTS_TAN_MECHANISM_BEFORE_BOOTSTRAP",),
 }
 _RUNTIME_PATCHES_APPLIED = False
+SEPA_BASIC_ALLOWED_CHARS = frozenset(
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 /-?:().,'+"
+)
 
 
 def _first_present(*values: Any) -> Any:
@@ -365,6 +368,38 @@ def account_matches(account: Any, needle: Optional[str]) -> bool:
         if value
     }
     return needle in candidates
+
+
+def compact_iban(value: str) -> str:
+    return "".join(str(value).split()).upper()
+
+
+def is_valid_iban(value: str) -> bool:
+    iban = compact_iban(value)
+    if len(iban) < 15 or len(iban) > 34:
+        return False
+    if not iban[:2].isalpha() or not iban[2:4].isdigit() or not iban.isalnum():
+        return False
+    rearranged = iban[4:] + iban[:4]
+    numeric = []
+    for char in rearranged:
+        if char.isdigit():
+            numeric.append(char)
+        elif char.isalpha():
+            numeric.append(str(ord(char) - 55))
+        else:
+            return False
+    try:
+        return int("".join(numeric)) % 97 == 1
+    except ValueError:
+        return False
+
+
+def first_unsupported_sepa_char(value: str) -> Optional[str]:
+    for char in str(value):
+        if char not in SEPA_BASIC_ALLOWED_CHARS:
+            return char
+    return None
 
 
 def select_accounts(accounts: Iterable[Any], needle: Optional[str] = None) -> list[Any]:
