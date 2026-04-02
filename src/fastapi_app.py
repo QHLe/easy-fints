@@ -456,74 +456,88 @@ def retry_transfer_with_name(payload: dict[str, Any]):
         )
 
     old_client: PyFinIntegrationClient = session.get("client")
-    old_params = dict(session.get("params") or {})
-    old_params["recipient_name"] = recipient_name
+    params = dict(session.get("params") or {})
+    params["recipient_name"] = recipient_name
     append_operation_step_log(
         "transfer",
         "retry_with_name_requested",
         {
-            "old_session_id": session_id,
+            "session_id": session_id,
             "new_recipient_name": recipient_name,
+            "reuse_existing_client": True,
+            "has_standing_dialog": bool(old_client._has_standing_dialog()),
         },
     )
-    new_client = PyFinIntegrationClient(
-        old_client.config,
-        profile_id=old_client.profile_id,
-        display_name=old_client.display_name,
-        bank_info_path=old_client.bank_info_path,
-        sepa_profile_path=old_client.sepa_profile_path,
-        auto_persist=old_client.auto_persist,
+    old_client.clear_pending_confirmations()
+    _mark_session_state(
+        session_id,
+        SESSION_STATE_RUNNING,
+        params=params,
+        challenge=None,
+        vop=None,
+        message=None,
+        retry_with_name=True,
     )
-    _close_session(session_id)
 
     try:
-        result = _transfer_handler(new_client, old_params)
+        result = _transfer_handler(old_client, params)
+        _mark_session_state(session_id, SESSION_STATE_COMPLETED)
+        _close_session(session_id)
         return _serialize_result(result)
     except TanRequiredError as exc:
-        new_sid = _create_session(new_client, "transfer", old_params)
         append_operation_step_log(
             "transfer",
             "challenge_returned",
             {
-                "old_session_id": session_id,
-                "session_id": new_sid,
+                "session_id": session_id,
                 "state": _session_state_from_challenge(exc.challenge.to_dict()),
                 "message": exc.message,
+                "retry_with_name": True,
             },
         )
         return _tan_required_session_response(
-            new_sid,
+            session_id,
             operation=exc.operation,
             message=exc.message,
             challenge=exc.challenge.to_dict(),
         )
     except VOPRequiredError as exc:
-        new_sid = _create_session(new_client, "transfer", old_params)
         append_operation_step_log(
             "transfer",
             "vop_required",
             {
-                "old_session_id": session_id,
-                "session_id": new_sid,
+                "session_id": session_id,
                 "state": SESSION_STATE_AWAITING_VOP,
                 "message": exc.message,
                 "vop_result": exc.challenge.result,
                 "close_match_name": exc.challenge.close_match_name,
                 "other_identification": exc.challenge.other_identification,
                 "na_reason": exc.challenge.na_reason,
+                "retry_with_name": True,
             },
         )
         return _vop_required_session_response(
-            new_sid,
+            session_id,
             operation=exc.operation,
             message=exc.message,
             vop=exc.challenge.to_dict(),
         )
     except FinTSValidationError as exc:
-        new_client.close()
+        _mark_session_state(session_id, SESSION_STATE_FAILED, message=exc.message)
+        _close_session(session_id)
         return _validation_response(message=exc.message, field=exc.field, operation=exc.operation, code=exc.code)
     except FinTSOperationError as exc:
-        new_client.close()
+        append_operation_step_log(
+            "transfer",
+            "retry_with_name_failed",
+            {
+                "session_id": session_id,
+                "message": exc.message,
+                "bank_response": summarize_last_bank_response(),
+            },
+        )
+        _mark_session_state(session_id, SESSION_STATE_FAILED, message=exc.message)
+        _close_session(session_id)
         return _session_response(
             502,
             error="fints_error",
@@ -534,17 +548,6 @@ def retry_transfer_with_name(payload: dict[str, Any]):
 
 @app.post(
     "/confirm",
-    response_model=list[AccountSummaryResponseModel] | list[AccountTransactionsResponseModel] | TransferResponseModel | ConfirmationPendingResponseModel,
-    responses={
-        400: {"model": ValidationErrorResponseModel, "description": "Invalid request payload"},
-        404: {"model": NotFoundResponseModel, "description": "Session not found or expired"},
-        409: {"model": TanRequiredResponseModel, "description": "TAN challenge required"},
-        500: {"model": UnknownOperationResponseModel, "description": "Unknown session operation"},
-        502: {"model": FinTSErrorResponseModel, "description": "FinTS/provider error"},
-    },
-)
-@app.post(
-    "/submit-tan",
     response_model=list[AccountSummaryResponseModel] | list[AccountTransactionsResponseModel] | TransferResponseModel | ConfirmationPendingResponseModel,
     responses={
         400: {"model": ValidationErrorResponseModel, "description": "Invalid request payload"},
@@ -600,7 +603,7 @@ def confirm(payload: dict[str, Any]):
         },
     )
 
-    selected_action = "submit_tan"
+    selected_action = "confirm_pending"
     if session_state == SESSION_STATE_AWAITING_VOP or getattr(client, "_pending_vop_response", None) is not None:
         selected_action = "approve_vop"
     _mark_session_state(session_id, SESSION_STATE_RUNNING, last_action=selected_action)
@@ -614,7 +617,7 @@ def confirm(payload: dict[str, Any]):
                 )
             chall, vop, submit_result = client.approve_vop()
         else:
-            chall, vop, submit_result = client.submit_tan(tan)
+            chall, vop, submit_result = client.confirm_pending(tan)
     except FinTSOperationError as exc:
         append_operation_step_log(
             "confirm",

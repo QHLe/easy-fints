@@ -186,6 +186,13 @@ class PyFinIntegrationClient:
             self._pending_tan_response = None
             self._pending_vop_response = None
 
+    def clear_pending_confirmations(self) -> None:
+        """Drop local pending TAN/VoP state before retrying a transfer in the same client context."""
+        self._pending_tan_response = None
+        self._pending_vop_response = None
+        if self._client is not None and getattr(self._client, "init_tan_response", None) is not None:
+            self._client.init_tan_response = None
+
     def _has_standing_dialog(self) -> bool:
         if self._client is None:
             return False
@@ -435,9 +442,9 @@ class PyFinIntegrationClient:
         logger.info("Operation '%s' completed with result_type=%s", operation, type(result).__name__)
         return result
 
-    def submit_tan(self, tan: str = "") -> tuple[Optional[TanChallenge], Optional[VOPChallenge], Any]:
+    def confirm_pending(self, tan: str = "") -> tuple[Optional[TanChallenge], Optional[VOPChallenge], Any]:
         append_operation_step_log(
-            "submit_tan",
+            "confirm_pending",
             "started",
             {
                 "client_open": self._client is not None,
@@ -448,24 +455,24 @@ class PyFinIntegrationClient:
         )
         if self._client is None:
             append_operation_step_log(
-                "submit_tan",
+                "confirm_pending",
                 "failed",
                 {
                     "reason": "client is not open",
                     "bank_response": summarize_last_bank_response(),
                 },
             )
-            raise FinTSOperationError("submit_tan", "client is not open")
+            raise FinTSOperationError("confirm_pending", "client is not open")
         if self._pending_tan_response is None:
             append_operation_step_log(
-                "submit_tan",
+                "confirm_pending",
                 "failed",
                 {
                     "reason": "no pending TAN challenge",
                     "bank_response": summarize_last_bank_response(),
                 },
             )
-            raise FinTSOperationError("submit_tan", "no pending TAN challenge")
+            raise FinTSOperationError("confirm_pending", "no pending TAN challenge")
 
         try:
             with self._client_scope():
@@ -473,7 +480,7 @@ class PyFinIntegrationClient:
                 result = self._client.send_tan(self._pending_tan_response, tan)
         except TanRequiredError as exc:
             append_operation_step_log(
-                "submit_tan",
+                "confirm_pending",
                 "challenge_returned",
                 {"message": exc.message},
             )
@@ -481,7 +488,7 @@ class PyFinIntegrationClient:
             return (exc.challenge, None, None)
         except VOPRequiredError as exc:
             append_operation_step_log(
-                "submit_tan",
+                "confirm_pending",
                 "vop_required",
                 {
                     "message": exc.message,
@@ -495,7 +502,7 @@ class PyFinIntegrationClient:
         except Exception as exc:
             logger.exception("Exception while submitting TAN")
             append_operation_step_log(
-                "submit_tan",
+                "confirm_pending",
                 "failed",
                 {
                     "reason": str(exc),
@@ -509,13 +516,13 @@ class PyFinIntegrationClient:
                 self._pending_tan_response = None
                 self._pending_vop_response = exc
                 return (None, VOPChallenge.from_response(exc), None)
-            raise FinTSOperationError("submit_tan", str(exc)) from exc
+            raise FinTSOperationError("confirm_pending", str(exc)) from exc
 
         if looks_like_tan_required(result):
             self._pending_tan_response = result
             self._pending_vop_response = None
             append_operation_step_log(
-                "submit_tan",
+                "confirm_pending",
                 "challenge_returned",
                 {"message": serialize_value(getattr(result, "challenge", None))},
             )
@@ -525,7 +532,7 @@ class PyFinIntegrationClient:
             self._pending_vop_response = result
             vop = VOPChallenge.from_response(result)
             append_operation_step_log(
-                "submit_tan",
+                "confirm_pending",
                 "vop_required",
                 {
                     "result": vop.result,
@@ -540,7 +547,7 @@ class PyFinIntegrationClient:
         if getattr(self._client, "init_tan_response", None) is not None:
             self._client.init_tan_response = None
         append_operation_log(
-            "submit_tan",
+            "confirm_pending",
             {"status": "completed", "result_type": type(result).__name__},
         )
         return (None, None, result)

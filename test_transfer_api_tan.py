@@ -5,11 +5,11 @@ import sys
 
 from api_tan_test_helper import (
     build_config_payload,
+    confirm_flow,
     load_dotenv_file,
     post_json,
     print_json,
     require_env,
-    submit_tan_flow,
 )
 
 
@@ -40,7 +40,7 @@ def main() -> int:
 
     if status == 409 and response_payload.get("error") == "tan_required":
         print("TAN required for /transfer.")
-        result = submit_tan_flow(base_url, response_payload, challenge_stem="api_transfer_challenge")
+        result = confirm_flow(base_url, response_payload, challenge_stem="api_transfer_challenge")
         print_json("Transfer response after confirmation:", result)
         return 0
 

@@ -84,12 +84,12 @@ def print_json(title: str, payload: Any) -> None:
     print(json.dumps(payload, indent=2, ensure_ascii=False))
 
 
-def submit_tan_flow(base_url: str, response_payload: dict[str, Any], *, challenge_stem: str) -> dict[str, Any]:
+def confirm_flow(base_url: str, response_payload: dict[str, Any], *, challenge_stem: str) -> dict[str, Any]:
     session_id = response_payload.get("session_id")
     challenge = response_payload.get("challenge") or {}
     vop = response_payload.get("vop") or {}
     if not session_id:
-        raise RuntimeError("TAN response did not include session_id")
+        raise RuntimeError("Confirmation response did not include session_id")
 
     print(f"Session ID: {session_id}")
     if challenge.get("message"):

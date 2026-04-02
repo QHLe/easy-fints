@@ -47,7 +47,7 @@ OpenAPI docs will be available at:
 
 ## API Overview
 
-The API exposes five endpoints:
+The API exposes these main endpoints:
 
 - `GET /health`
 - `POST /accounts`
@@ -187,7 +187,9 @@ For `/transfer` in the current V1 scope:
 - `purpose` currently accepts a conservative SEPA-safe character set: letters, digits, spaces, and `/ - ? : ( ) . , ' +`
 - recipient name and IBAN are not locally matched against each other; any real payee verification is bank-/channel-dependent
 
-If a payee-verification step returns a close/no match, you can start a new transfer flow with a corrected recipient name via `POST /transfer/retry-with-name` using the previous `session_id`.
+If a payee-verification step returns a close/no match, you can retry with a corrected recipient name via `POST /transfer/retry-with-name`. The API keeps the same `session_id` and tries to reuse the current FinTS client/dialog when possible.
+
+A diagram of the full transfer flow is available in [`POST_transfer_workflow.md`](POST_transfer_workflow.md).
 
 ## TAN Flow
 
@@ -222,15 +224,23 @@ curl -sS -X POST http://127.0.0.1:8000/confirm \
   -d '{"session_id":"<uuid>","tan":"123456"}'
 ```
 
+If the current state is `awaiting_vop`, continue with:
+
+```bash
+curl -sS -X POST http://127.0.0.1:8000/confirm \
+  -H "Content-Type: application/json" \
+  -d '{"session_id":"<uuid>","approve_vop":true}'
+```
+
 Possible `/confirm` responses:
 
 - `200`: original operation resumed successfully
 - `202`: decoupled/app confirmation is still pending
-- `409`: another TAN challenge is required
+- `409`: another TAN or VoP challenge is required
 - `404`: session was not found or expired
 - `502`: FinTS/provider error while resuming
 
-If `state` is `awaiting_decoupled`, confirm the operation in the banking app and call `/confirm` again. The legacy `/submit-tan` path remains available as an alias.
+If `state` is `awaiting_decoupled`, confirm the operation in the banking app and call `/confirm` again. If `state` is `awaiting_vop`, inspect the `vop` object in the response and either approve it with `approve_vop: true` or restart the transfer with `/transfer/retry-with-name`.
 
 Sessions are stored in memory only. They are not shared across multiple workers or containers.
 
@@ -293,6 +303,7 @@ The repository includes small helper scripts for manual TAN-based testing:
 - [`test_accounts_api_tan.py`](test_accounts_api_tan.py)
 - [`test_balance_api_tan.py`](test_balance_api_tan.py)
 - [`test_transactions_api_tan.py`](test_transactions_api_tan.py)
+- [`test_transfer_api_tan.py`](test_transfer_api_tan.py)
 
 They use [`api_tan_test_helper.py`](api_tan_test_helper.py), read credentials from `.env`, call the API, and prompt for TAN input when required.
 

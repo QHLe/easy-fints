@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import sys
-from api_tan_test_helper import build_config_payload, load_dotenv_file, post_json, print_json, submit_tan_flow
+from api_tan_test_helper import build_config_payload, confirm_flow, load_dotenv_file, post_json, print_json
 
 
 def main() -> int:
@@ -19,8 +19,8 @@ def main() -> int:
 
     if status == 409 and payload.get("error") == "tan_required":
         print("TAN required for /balance.")
-        result = submit_tan_flow(base_url, payload, challenge_stem="api_balance_challenge")
-        print_json("Balance response after TAN:", result)
+        result = confirm_flow(base_url, payload, challenge_stem="api_balance_challenge")
+        print_json("Balance response after confirmation:", result)
         return 0
 
     print_json(f"Unexpected response (status {status}):", payload)

@@ -12,7 +12,7 @@ Priority legend
 
 ## High priority
 
-- Authentication & Authorization: require and validate credentials for all endpoints (at minimum an `API_KEY` or token). Protect `/submit-tan` especially.
+- Authentication & Authorization: require and validate credentials for all endpoints (at minimum an `API_KEY` or token). Protect `/confirm` especially.
 - Replace in-memory sessions with a multi-process safe store (Redis) and a single worker or queue to resume operations. The current in-memory `_sessions` works only for single-process dev.
 - TLS and deployment: run behind TLS (reverse proxy) and require HTTPS for production.
 - Money transfer support: add a transfer endpoint to initiate SEPA credit transfers with strict validation, confirmation preview, and TAN-based authorization/resume flow.
@@ -55,7 +55,7 @@ Priority legend
 
 - Sessions & resume flow:
   - Store minimal resume descriptor (callable or operation name + args) and reconstruct or persist enough state to resume the operation on the worker that holds the FinTS client.
-  - Prefer a dedicated worker process that manages FinTS clients and only accepts resume/submit-tan operations from the API process via a queue or RPC.
+  - Prefer a dedicated worker process that manages FinTS clients and only accepts resume/confirm operations from the API process via a queue or RPC.
 
 - Security:
   - Never store raw PINs in logs or plaintext repositories.
@@ -66,4 +66,3 @@ Priority legend
 
 - PR 1: Add simple API key auth and wire it to all endpoints.
 - PR 2: Add basic Pydantic response models for account and transaction schemas and wire `response_model` into routes.
-

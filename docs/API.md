@@ -138,12 +138,12 @@ Responses:
 
 - `200`: `TransferResponse`
 - `400`: invalid or incomplete config
-- `409`: TAN required
+- `409`: TAN or VoP confirmation required
 - `502`: FinTS/provider error
 
 ### `POST /transfer/retry-with-name`
 
-Retry a transfer after a payee-verification mismatch by starting a new transfer flow with a corrected recipient name.
+Retry a transfer after a payee-verification mismatch by reusing the current transfer session with a corrected recipient name when possible.
 
 Request body:
 
@@ -157,8 +157,8 @@ Request body:
 Notes:
 
 - the referenced session must belong to a transfer and currently be in `awaiting_vop`
-- the old session is closed and replaced by a new transfer flow
-- the response may therefore return a new `session_id`
+- the server keeps the same `session_id` and tries to reuse the existing FinTS client/dialog
+- the bank may still treat the retried transfer as a new payment order
 - this reduces request reconstruction effort, but does not guarantee fewer TAN/App confirmations because the bank may treat it as a new payment order
 
 Responses:
@@ -166,7 +166,7 @@ Responses:
 - `200`: `TransferResponse`
 - `400`: invalid request or session state
 - `404`: session not found
-- `409`: TAN or VoP confirmation required for the new transfer flow
+- `409`: TAN or VoP confirmation required for the retried transfer flow
 - `502`: FinTS/provider error
 
 Example validation error:
@@ -187,11 +187,16 @@ Request body:
 ```json
 {
   "session_id": "<uuid>",
-  "tan": "123456"
+  "tan": "123456",
+  "approve_vop": false
 }
 ```
 
-For decoupled/app-based approval, `tan` may be omitted or empty and the same endpoint can be called again after app confirmation.
+Notes:
+
+- `tan` is used when the current session state is `awaiting_tan`
+- for decoupled/app-based approval, `tan` may be omitted or empty and the same endpoint can be called again after app confirmation
+- `approve_vop` must be set to `true` when the current session state is `awaiting_vop`
 
 Responses:
 
@@ -199,7 +204,7 @@ Responses:
 - `202`: approval is still pending in the banking app
 - `400`: missing `session_id`
 - `404`: session not found or expired
-- `409`: another TAN challenge is required
+- `409`: another TAN or VoP challenge is required
 - `500`: unknown stored operation
 - `502`: FinTS/provider error
 
@@ -230,6 +235,37 @@ When an operation requires a TAN, the API responds with HTTP `409`:
 
 Use `session_id` with `/confirm` to continue the original operation.
 
+If the bank requires explicit payee-verification approval, the API responds with HTTP `409`:
+
+```json
+{
+  "error": "vop_required",
+  "session_id": "<uuid>",
+  "state": "awaiting_vop",
+  "next_action": "approve_vop",
+  "operation": "transfer",
+  "message": "Bank requires explicit approval of the payee verification result before execution.",
+  "challenge": null,
+  "vop": {
+    "result": "RCVC",
+    "message": "Bank requires explicit approval of the payee verification result before execution.",
+    "close_match_name": null,
+    "other_identification": null,
+    "na_reason": null,
+    "raw_repr": "..."
+  }
+}
+```
+
+Continue that flow with:
+
+```json
+{
+  "session_id": "<uuid>",
+  "approve_vop": true
+}
+```
+
 Sessions are:
 
 - stored in memory
@@ -240,6 +276,7 @@ Session state values currently used by the API:
 
 - `awaiting_tan`: call `/confirm` with a TAN
 - `awaiting_decoupled`: confirm in the banking app and call `/confirm` again
+- `awaiting_vop`: inspect the `vop` payload and call `/confirm` with `approve_vop: true`, or restart with `/transfer/retry-with-name`
 - `running` and `resuming`: transient internal states while the server continues the FinTS flow
 - `completed` and `failed`: terminal states; the session is then removed
 

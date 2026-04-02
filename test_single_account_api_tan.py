@@ -5,11 +5,11 @@ import sys
 
 from api_tan_test_helper import (
     build_config_payload,
+    confirm_flow,
     load_dotenv_file,
     post_json,
     print_json,
     require_env,
-    submit_tan_flow,
 )
 
 
@@ -40,8 +40,8 @@ def main() -> int:
         print_json("Balance response:", balance_payload)
     elif balance_status == 409 and balance_payload.get("error") == "tan_required":
         print("TAN required for /balance.")
-        result = submit_tan_flow(base_url, balance_payload, challenge_stem="api_single_balance_challenge")
-        print_json("Balance response after TAN:", result)
+        result = confirm_flow(base_url, balance_payload, challenge_stem="api_single_balance_challenge")
+        print_json("Balance response after confirmation:", result)
     else:
         print_json(f"Unexpected balance response (status {balance_status}):", balance_payload)
         return 1
@@ -62,8 +62,8 @@ def main() -> int:
 
     if transactions_status == 409 and transactions_payload.get("error") == "tan_required":
         print("TAN required for /transactions.")
-        result = submit_tan_flow(base_url, transactions_payload, challenge_stem="api_single_transactions_challenge")
-        print_json("Transactions response after TAN:", result)
+        result = confirm_flow(base_url, transactions_payload, challenge_stem="api_single_transactions_challenge")
+        print_json("Transactions response after confirmation:", result)
         return 0
 
     print_json(f"Unexpected transactions response (status {transactions_status}):", transactions_payload)
