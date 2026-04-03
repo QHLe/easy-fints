@@ -2,6 +2,10 @@
 
 Small FastAPI wrapper around `python-fints`.
 
+PyPI package:
+
+- `fints-rest-wrapper`
+
 It currently supports:
 
 - account listing
@@ -21,7 +25,28 @@ Requirements:
 - a bank account with FinTS/HBCI access
 - valid FinTS credentials and server URL
 
-Create a virtualenv and install the package with development dependencies:
+Install from PyPI:
+
+```bash
+pip install fints-rest-wrapper
+```
+
+Start the API server after installation:
+
+```bash
+fints-rest-server start
+fints-rest-server status
+fints-rest-server stop
+```
+
+Configuration priority for the CLI:
+
+- explicit CLI flags like `--host` or `--port`
+- values loaded from `--env-file`
+- process environment variables
+- built-in defaults
+
+For local development:
 
 ```bash
 python -m venv .venv
@@ -42,6 +67,21 @@ Start the API:
 
 ```bash
 uvicorn fints_rest_wrapper.fastapi_app:app --reload --host 0.0.0.0 --port 8000
+```
+
+Installed CLI defaults:
+
+- server host: `0.0.0.0`
+- server port: `8000`
+- PID file: `.fints-rest-server.pid`
+- log file: `.fints-rest-server.log`
+
+CLI examples:
+
+```bash
+fints-rest-server start --host 127.0.0.1 --port 9686
+fints-rest-server start --env-file /etc/fints-rest-wrapper.env
+fints-rest-server stop
 ```
 
 OpenAPI:

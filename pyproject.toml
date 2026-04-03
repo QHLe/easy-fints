@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "fints-rest-wrapper"
-version = "1.0.2"
+version = "1.0.3"
 description = "Small FastAPI wrapper around python-fints"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -13,6 +13,7 @@ authors = [
   { name = "qhle" },
 ]
 license-files = ["LICENSE"]
+keywords = ["fints", "hbci", "fastapi", "banking", "rest", "api"]
 classifiers = [
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3.11",
@@ -31,6 +32,14 @@ dev = [
   "build",
   "pytest",
 ]
+
+[project.scripts]
+fints-rest-server = "fints_rest_wrapper.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/QHLe/Python-Fints-REST-wrapper"
+Repository = "https://github.com/QHLe/Python-Fints-REST-wrapper"
+Issues = "https://github.com/QHLe/Python-Fints-REST-wrapper/issues"
 
 [tool.setuptools]
 include-package-data = true

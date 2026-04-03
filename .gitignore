@@ -9,3 +9,5 @@ build/
 dist/
 *.egg-info/
 logs/
+.fints-rest-server.pid
+.fints-rest-server.log
