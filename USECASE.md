@@ -109,6 +109,6 @@ That would keep:
 - Put technical design details in code, tests, or a separate implementation note later.
 - Link each implemented scenario to one or more verification checks in `VERIFICATION.md`.
 - The automated simulated checks currently live in:
-  [tests/test_api_read_flows.py](/home/bomay/git/python-fints-REST-wrapper/tests/test_api_read_flows.py),
-  [tests/test_api_transfer_flows.py](/home/bomay/git/python-fints-REST-wrapper/tests/test_api_transfer_flows.py),
-  and [tests/test_api_session_lifecycle.py](/home/bomay/git/python-fints-REST-wrapper/tests/test_api_session_lifecycle.py).
+  [`tests/test_api_read_flows.py`](tests/test_api_read_flows.py),
+  [`tests/test_api_transfer_flows.py`](tests/test_api_transfer_flows.py),
+  and [`tests/test_api_session_lifecycle.py`](tests/test_api_session_lifecycle.py).

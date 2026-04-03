@@ -19,9 +19,9 @@ Live-bank runs should stay small and focused.
 
 Current automated baseline:
 
-- [tests/test_api_read_flows.py](/home/bomay/git/python-fints-REST-wrapper/tests/test_api_read_flows.py)
-- [tests/test_api_transfer_flows.py](/home/bomay/git/python-fints-REST-wrapper/tests/test_api_transfer_flows.py)
-- [tests/test_api_session_lifecycle.py](/home/bomay/git/python-fints-REST-wrapper/tests/test_api_session_lifecycle.py)
+- [`tests/test_api_read_flows.py`](tests/test_api_read_flows.py)
+- [`tests/test_api_transfer_flows.py`](tests/test_api_transfer_flows.py)
+- [`tests/test_api_session_lifecycle.py`](tests/test_api_session_lifecycle.py)
 - runs against a stateful fake FinTS backend/client
 - exercises endpoint logic directly with deterministic session state transitions
 

@@ -15,7 +15,7 @@ It currently supports:
 - TAN / decoupled confirmation over HTTP
 - payee verification (`VoP`) continuation
 
-The ASGI entrypoint is [fints_rest_wrapper/fastapi_app.py](/home/bomay/git/python-fints-REST-wrapper/fints_rest_wrapper/fastapi_app.py).
+The ASGI entrypoint is [`fints_rest_wrapper/fastapi_app.py`](fints_rest_wrapper/fastapi_app.py).
 
 ## Quick Start
 
@@ -178,12 +178,12 @@ The TTL defaults to `300` seconds and can be changed with `FINTS_SESSION_TTL_SEC
 
 The repository includes small scripts for manual API testing:
 
-- [test_accounts_api_tan.py](/home/bomay/git/python-fints-REST-wrapper/test_accounts_api_tan.py)
-- [test_balance_api_tan.py](/home/bomay/git/python-fints-REST-wrapper/test_balance_api_tan.py)
-- [test_transactions_api_tan.py](/home/bomay/git/python-fints-REST-wrapper/test_transactions_api_tan.py)
-- [test_transfer_api_tan.py](/home/bomay/git/python-fints-REST-wrapper/test_transfer_api_tan.py)
+- [`test_accounts_api_tan.py`](test_accounts_api_tan.py)
+- [`test_balance_api_tan.py`](test_balance_api_tan.py)
+- [`test_transactions_api_tan.py`](test_transactions_api_tan.py)
+- [`test_transfer_api_tan.py`](test_transfer_api_tan.py)
 
-They use [api_tan_test_helper.py](/home/bomay/git/python-fints-REST-wrapper/api_tan_test_helper.py) and read credentials from `.env`.
+They use [`api_tan_test_helper.py`](api_tan_test_helper.py) and read credentials from `.env`.
 
 Optional helper-script env vars for manual transfer runs only:
 
@@ -194,25 +194,25 @@ Optional helper-script env vars for manual transfer runs only:
 
 Detailed API reference:
 
-- [docs/API.md](/home/bomay/git/python-fints-REST-wrapper/docs/API.md)
+- [`docs/API.md`](docs/API.md)
 
 Transfer workflow:
 
-- [POST_transfer_workflow.md](/home/bomay/git/python-fints-REST-wrapper/POST_transfer_workflow.md)
+- [`POST_transfer_workflow.md`](POST_transfer_workflow.md)
 
 High-level testing/verification notes:
 
-- [USECASE.md](/home/bomay/git/python-fints-REST-wrapper/USECASE.md)
-- [VERIFICATION.md](/home/bomay/git/python-fints-REST-wrapper/VERIFICATION.md)
+- [`USECASE.md`](USECASE.md)
+- [`VERIFICATION.md`](VERIFICATION.md)
 
 ## Development
 
 Important files:
 
-- [fints_rest_wrapper/fastapi_app.py](/home/bomay/git/python-fints-REST-wrapper/fints_rest_wrapper/fastapi_app.py)
-- [fints_rest_wrapper/client.py](/home/bomay/git/python-fints-REST-wrapper/fints_rest_wrapper/client.py)
-- [fints_rest_wrapper/helpers.py](/home/bomay/git/python-fints-REST-wrapper/fints_rest_wrapper/helpers.py)
-- [fints_rest_wrapper/models.py](/home/bomay/git/python-fints-REST-wrapper/fints_rest_wrapper/models.py)
+- [`fints_rest_wrapper/fastapi_app.py`](fints_rest_wrapper/fastapi_app.py)
+- [`fints_rest_wrapper/client.py`](fints_rest_wrapper/client.py)
+- [`fints_rest_wrapper/helpers.py`](fints_rest_wrapper/helpers.py)
+- [`fints_rest_wrapper/models.py`](fints_rest_wrapper/models.py)
 
 Basic checks:
 
