@@ -57,11 +57,15 @@ pip install -e .[dev]
 Minimal `.env`:
 
 ```env
-FINTS_PRODUCT_ID=HBCI4Java
-FINTS_PRODUCT_NAME=HBCI4Java
-FINTS_PRODUCT_VERSION=3.0
+FINTS_PRODUCT_ID=YourProductID
+FINTS_PRODUCT_NAME=YourProductName
+FINTS_PRODUCT_VERSION=YourProductVersion
 FINTS_SESSION_TTL_SECONDS=300
 ```
+
+A FinTS product ID can be requested via the official registration page:
+
+- `https://www.fints.org/de/hersteller/produktregistrierung`
 
 Start the API:
 

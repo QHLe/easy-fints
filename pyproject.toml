@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "fints-rest-wrapper"
-version = "1.0.3"
+version = "1.0.4"
 description = "Small FastAPI wrapper around python-fints"
 readme = "README.md"
 requires-python = ">=3.11"
