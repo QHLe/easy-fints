@@ -7,22 +7,39 @@ Priority legend
 - Medium: important improvements for reliability, testing, and operator experience
 - Low: nice-to-have features or future polish
 
+## Current status
+
+Already implemented:
+
+- FastAPI endpoints for `/accounts`, `/balance`, `/transactions`, `/transfer`, `/transfer/retry-with-name`, and `/confirm`
+- dedicated `DELETE /sessions/{session_id}` cancel endpoint for active confirmation sessions
+- read-only `GET /sessions/{session_id}` endpoint for active session inspection
+- explicit confirmation/session states for `awaiting_tan`, `awaiting_decoupled`, and `awaiting_vop`
+- auth-free API design with request-driven credentials/config and no profile abstraction
+- SEPA single transfer flow with field validation, TAN resume, VoP handling, retry with corrected recipient name, instant payment, and scheduled execution dates
+- normalized unsupported transfer product errors for instant/scheduled transfer capability issues
+- structured `transfer_overview` payload in non-final transfer challenge responses and final `200` transfer responses
+- configurable session inactivity TTL via `FINTS_SESSION_TTL_SECONDS`
+- graceful shutdown closes active FinTS clients
+- response models and OpenAPI-visible schemas for the main endpoints
+- manual TAN/VoP helper scripts and workflow documentation
+
+Not implemented yet:
+
+- optional deployment hardening for exposed environments
+
 
 ---
 
 ## High priority
 
-- Authentication & Authorization: require and validate credentials for all endpoints (at minimum an `API_KEY` or token). Protect `/confirm` especially.
-- Replace in-memory sessions with a multi-process safe store (Redis) and a single worker or queue to resume operations. The current in-memory `_sessions` works only for single-process dev.
 - TLS and deployment: run behind TLS (reverse proxy) and require HTTPS for production.
-- Money transfer support: add a transfer endpoint to initiate SEPA credit transfers with strict validation, confirmation preview, and TAN-based authorization/resume flow.
 
 
 ## Medium priority
 
-- Docker + docker-compose: provide a `Dockerfile` and `docker-compose.yml` with Redis for sessions for easy local and CI testing.
+- Docker + docker-compose: provide a reference setup for local and CI testing.
 - Observability: structured logging, request IDs, and basic Prometheus metrics (request count, active sessions, TANs issued).
-- Robust session lifecycle: make session TTL configurable via env var, provide endpoints to query/cancel sessions, ensure graceful shutdown closes active FinTS clients.
 
 
 ## Low priority / nice-to-have
@@ -31,38 +48,28 @@ Priority legend
 - Add a health/readiness probe that reflects ability to reach configured bank endpoints (optional separate check).
 
 
-## Quick wins (recommended order)
-
-1. Add a minimal API key auth dependency in `src/fastapi_app.py` (env var `API_KEY`) and protect all endpoints.
-2. Add `response_model` using small Pydantic models (or convert serializable dataclasses to pydantic) so `/docs` lists correct schema.
-
-
 ## Decisions / questions (need your input)
 
-- How should credentials be handled in production?
-  - Option A: clients send PIN in each request (current behavior — not recommended)
-  - Option B: clients register a profile (server stores encrypted credentials) and call endpoints by `profile_id` + optional PIN/TAN challenge only
-  - Option C: integrate with an external secrets manager (Vault / KMS)
-
-- Multi-process deployment: do you plan to run multiple uvicorn workers or multiple containers? If yes, we'll need Redis or a shared worker pattern for sessions.
-
-- Authentication method: prefer a simple API key for now, or should I implement OAuth2 / JWT / mTLS?
-
-- Session TTL: default 5 minutes OK or do you want another value?
-
+- Credentials/config handling is intentionally request-driven:
+  - no server-side profile model
+  - no persistent credential store
+  - no server-managed user/account records
+  - only short-lived runtime session state in memory while an active confirm flow is in progress
 
 ## Implementation suggestions / design notes
 
 - Sessions & resume flow:
-  - Store minimal resume descriptor (callable or operation name + args) and reconstruct or persist enough state to resume the operation on the worker that holds the FinTS client.
-  - Prefer a dedicated worker process that manages FinTS clients and only accepts resume/confirm operations from the API process via a queue or RPC.
+  - Keep sessions process-local and in memory only.
+  - Do not introduce profile storage, credential persistence, or server-managed account metadata.
 
 - Security:
   - Never store raw PINs in logs or plaintext repositories.
-  - Enforce HTTPS, use short-lived sessions for TANs, and add rate-limiting.
+  - Keep the server stateless with respect to persistent user data; only ephemeral in-memory runtime state for active confirmations is acceptable.
+  - Avoid persisting live FinTS dialog state, pending TAN objects, or raw client objects in central storage unless there is a very strong reason and compensating controls.
+  - Keep the core API auth-free for easy integration, and prefer external protection layers such as network isolation, reverse proxy auth, mTLS, or VPN if deployment requires access control.
+  - Enforce HTTPS, use short-lived sessions for TANs, and add rate-limiting where exposure warrants it.
 
 
 ## Suggested next PRs (small, actionable)
 
-- PR 1: Add simple API key auth and wire it to all endpoints.
-- PR 2: Add basic Pydantic response models for account and transaction schemas and wire `response_model` into routes.
+- PR 3: Keep deployment guidance focused on the simple single-process model unless a real scaling need appears.

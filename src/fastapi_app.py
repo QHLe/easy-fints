@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import logging
 import os
 import uuid
 from collections.abc import Callable
@@ -19,6 +20,7 @@ from .client import (
 from .diagnostics import summarize_last_bank_response
 from .exceptions import (
     FinTSConfigError,
+    FinTSCapabilityError,
     FinTSOperationError,
     FinTSValidationError,
     TanRequiredError,
@@ -32,18 +34,22 @@ from .models import (
     FinTSErrorResponseModel,
     HealthResponseModel,
     NotFoundResponseModel,
+    SessionCancelResponseModel,
+    SessionInfoResponseModel,
     TanRequiredResponseModel,
+    UnsupportedTransferProductResponseModel,
     TransferResponseModel,
     UnknownOperationResponseModel,
     ValidationErrorResponseModel,
 )
 
 
+logger = logging.getLogger("pyfin_api")
 app = FastAPI()
 
 # In-memory operation sessions.
 SESSIONS: dict[str, dict[str, Any]] = {}
-SESSION_TTL = 300  # seconds
+DEFAULT_SESSION_TTL_SECONDS = 300
 OperationHandler = Callable[[PyFinIntegrationClient, dict[str, Any]], Any]
 SESSION_STATE_RUNNING = "running"
 SESSION_STATE_AWAITING_TAN = "awaiting_tan"
@@ -55,8 +61,33 @@ SESSION_STATE_FAILED = "failed"
 COMMON_ERROR_RESPONSES = {
     400: {"model": ValidationErrorResponseModel, "description": "Invalid request payload"},
     409: {"model": TanRequiredResponseModel, "description": "TAN challenge required"},
+    422: {"model": UnsupportedTransferProductResponseModel, "description": "Unsupported bank transfer product"},
     502: {"model": FinTSErrorResponseModel, "description": "FinTS/provider error"},
 }
+
+
+def _load_session_ttl_seconds() -> int:
+    raw_value = os.getenv("FINTS_SESSION_TTL_SECONDS", str(DEFAULT_SESSION_TTL_SECONDS))
+    try:
+        ttl_seconds = int(str(raw_value).strip())
+    except (TypeError, ValueError):
+        logger.warning(
+            "Invalid FINTS_SESSION_TTL_SECONDS=%r, using default %s",
+            raw_value,
+            DEFAULT_SESSION_TTL_SECONDS,
+        )
+        return DEFAULT_SESSION_TTL_SECONDS
+    if ttl_seconds <= 0:
+        logger.warning(
+            "Non-positive FINTS_SESSION_TTL_SECONDS=%r, using default %s",
+            raw_value,
+            DEFAULT_SESSION_TTL_SECONDS,
+        )
+        return DEFAULT_SESSION_TTL_SECONDS
+    return ttl_seconds
+
+
+SESSION_TTL = _load_session_ttl_seconds()
 
 
 def _session_response(status_code: int, **content: Any) -> JSONResponse:
@@ -80,6 +111,82 @@ def _validation_response(
     )
 
 
+def _capability_response(
+    *,
+    operation: str,
+    product: str,
+    message: str,
+    execution_date: str | None = None,
+    instant_payment: bool | None = None,
+) -> JSONResponse:
+    return _session_response(
+        422,
+        error="unsupported_transfer_product",
+        operation=operation,
+        product=product,
+        message=message,
+        execution_date=execution_date,
+        instant_payment=instant_payment,
+    )
+
+
+def _boolish(value: Any) -> bool:
+    if value in (None, ""):
+        return False
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int) and value in {0, 1}:
+        return bool(value)
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "off", ""}:
+            return False
+    return bool(value)
+
+
+def _transfer_overview_from_params(params: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not params:
+        return None
+    existing = params.get("transfer_overview")
+    existing_overview = dict(existing) if isinstance(existing, dict) else {}
+    source_account_label = (
+        params.get("source_account_label")
+        or params.get("source_account")
+        or existing_overview.get("source_account_label")
+    )
+    if source_account_label is None:
+        return None
+
+    execution_date = params.get("execution_date", existing_overview.get("execution_date"))
+    if hasattr(execution_date, "isoformat"):
+        execution_date_value = execution_date.isoformat()
+    elif execution_date in (None, ""):
+        execution_date_value = None
+    else:
+        execution_date_value = str(execution_date)
+
+    return {
+        "source_account_label": str(source_account_label),
+        "recipient_name": str(params.get("recipient_name") or existing_overview.get("recipient_name") or ""),
+        "recipient_iban": str(params.get("recipient_iban") or existing_overview.get("recipient_iban") or ""),
+        "recipient_bic": params.get("recipient_bic", existing_overview.get("recipient_bic")),
+        "amount": str(params.get("amount") or existing_overview.get("amount") or ""),
+        "currency": "EUR",
+        "purpose": str(params.get("purpose") or existing_overview.get("purpose") or ""),
+        "endtoend_id": str(
+            params.get("endtoend_id")
+            or existing_overview.get("endtoend_id")
+            or "NOTPROVIDED"
+        ),
+        "instant_payment": _boolish(
+            params.get("instant_payment", existing_overview.get("instant_payment"))
+        ),
+        "execution_date": execution_date_value,
+    }
+
+
 def _serialize_result(result: Any) -> Any:
     if isinstance(result, list):
         return [item.to_dict() if hasattr(item, "to_dict") else item for item in result]
@@ -94,21 +201,46 @@ def _result_count(result: Any) -> int:
     return 1 if result is not None else 0
 
 
+def _session_last_activity(session: dict[str, Any]) -> datetime:
+    return session.get("updated_at") or session.get("created_at") or datetime.utcnow()
+
+
+def _session_expires_at(session: dict[str, Any]) -> datetime:
+    return _session_last_activity(session) + timedelta(seconds=SESSION_TTL)
+
+
+def _session_expires_in_seconds(session: dict[str, Any]) -> int:
+    remaining = int((_session_expires_at(session) - datetime.utcnow()).total_seconds())
+    return max(0, remaining)
+
+
+def _session_snapshot(session_id: str, session: dict[str, Any]) -> dict[str, Any]:
+    created_at = session.get("created_at") or datetime.utcnow()
+    updated_at = session.get("updated_at")
+    state = str(session.get("state") or SESSION_STATE_RUNNING)
+    return {
+        "session_id": session_id,
+        "operation": session.get("operation"),
+        "state": state,
+        "next_action": _next_action_for_state(state),
+        "message": session.get("message"),
+        "created_at": created_at.isoformat(),
+        "updated_at": updated_at.isoformat() if updated_at else None,
+        "expires_at": _session_expires_at(session).isoformat(),
+        "expires_in_seconds": _session_expires_in_seconds(session),
+        "challenge": session.get("challenge"),
+        "vop": session.get("vop"),
+        "transfer_overview": session.get("transfer_overview"),
+    }
+
+
 def _prune_sessions() -> None:
     if not SESSIONS:
         return
     now = datetime.utcnow()
-    expired = [sid for sid, s in SESSIONS.items() if (now - s.get("created_at", now)) > timedelta(seconds=SESSION_TTL)]
+    expired = [sid for sid, s in SESSIONS.items() if _session_expires_at(s) <= now]
     for sid in expired:
-        try:
-            sess = SESSIONS.pop(sid, None)
-            if sess and sess.get("client"):
-                try:
-                    sess["client"].close()
-                except Exception:
-                    pass
-        except Exception:
-            pass
+        _close_session(sid)
 
 
 def _close_session(session_id: str) -> None:
@@ -125,12 +257,14 @@ def _close_session(session_id: str) -> None:
 
 def _create_session(client: PyFinIntegrationClient, operation: str, params: dict[str, Any]) -> str:
     sid = str(uuid.uuid4())
+    created_at = datetime.utcnow()
     SESSIONS[sid] = {
         "client": client,
         "operation": operation,
         "params": params,
         "state": SESSION_STATE_RUNNING,
-        "created_at": datetime.utcnow(),
+        "created_at": created_at,
+        "updated_at": created_at,
     }
     return sid
 
@@ -167,6 +301,7 @@ def _tan_required_session_response(
     operation: str | None,
     message: str | None,
     challenge: dict[str, Any],
+    transfer_overview: dict[str, Any] | None = None,
     status_code: int = 409,
 ) -> JSONResponse:
     state = _session_state_from_challenge(challenge)
@@ -175,6 +310,7 @@ def _tan_required_session_response(
         state,
         challenge=challenge,
         message=message,
+        transfer_overview=transfer_overview,
     )
     return _session_response(
         status_code,
@@ -185,6 +321,7 @@ def _tan_required_session_response(
         operation=operation,
         message=message,
         challenge=challenge,
+        transfer_overview=transfer_overview,
     )
 
 
@@ -194,6 +331,7 @@ def _vop_required_session_response(
     operation: str | None,
     message: str | None,
     vop: dict[str, Any],
+    transfer_overview: dict[str, Any] | None = None,
     status_code: int = 409,
 ) -> JSONResponse:
     _mark_session_state(
@@ -201,6 +339,7 @@ def _vop_required_session_response(
         SESSION_STATE_AWAITING_VOP,
         vop=vop,
         message=message,
+        transfer_overview=transfer_overview,
     )
     return _session_response(
         status_code,
@@ -212,12 +351,22 @@ def _vop_required_session_response(
         message=message,
         challenge=None,
         vop=vop,
+        transfer_overview=transfer_overview,
     )
 
 
 @app.get("/health", response_model=HealthResponseModel)
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.on_event("shutdown")
+def shutdown_active_sessions() -> None:
+    session_ids = list(SESSIONS.keys())
+    if session_ids:
+        logger.info("Closing %s active session(s) during shutdown", len(session_ids))
+        for session_id in session_ids:
+            _close_session(session_id)
 
 
 def _api_config_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
@@ -261,6 +410,12 @@ def _handle_client_operation(
     except TanRequiredError as exc:
         if client is None:
             raise HTTPException(status_code=500, detail="client unavailable for TAN session") from exc
+        transfer_overview = None
+        if operation == "transfer":
+            transfer_overview = getattr(exc, "transfer_overview", None)
+            if transfer_overview is not None:
+                params = dict(params)
+                params["transfer_overview"] = transfer_overview
         sid = _create_session(client, operation, params)
         append_operation_step_log(
             operation,
@@ -268,7 +423,6 @@ def _handle_client_operation(
             {
                 "session_id": sid,
                 "state": _session_state_from_challenge(exc.challenge.to_dict()),
-                "message": exc.message,
             },
         )
         return _tan_required_session_response(
@@ -276,10 +430,17 @@ def _handle_client_operation(
             operation=exc.operation,
             message=exc.message,
             challenge=exc.challenge.to_dict(),
+            transfer_overview=transfer_overview,
         )
     except VOPRequiredError as exc:
         if client is None:
             raise HTTPException(status_code=500, detail="client unavailable for confirmation session") from exc
+        transfer_overview = None
+        if operation == "transfer":
+            transfer_overview = getattr(exc, "transfer_overview", None)
+            if transfer_overview is not None:
+                params = dict(params)
+                params["transfer_overview"] = transfer_overview
         sid = _create_session(client, operation, params)
         append_operation_step_log(
             operation,
@@ -287,7 +448,6 @@ def _handle_client_operation(
             {
                 "session_id": sid,
                 "state": SESSION_STATE_AWAITING_VOP,
-                "message": exc.message,
                 "vop_result": exc.challenge.result,
                 "close_match_name": exc.challenge.close_match_name,
                 "other_identification": exc.challenge.other_identification,
@@ -299,9 +459,18 @@ def _handle_client_operation(
             operation=exc.operation,
             message=exc.message,
             vop=exc.challenge.to_dict(),
+            transfer_overview=transfer_overview,
         )
     except FinTSConfigError as exc:
         return _validation_response(message=str(exc), operation=exc.operation, code="config_error")
+    except FinTSCapabilityError as exc:
+        return _capability_response(
+            operation=exc.operation,
+            product=exc.product,
+            message=exc.message,
+            execution_date=exc.execution_date,
+            instant_payment=exc.instant_payment,
+        )
     except FinTSValidationError as exc:
         return _validation_response(message=exc.message, field=exc.field, operation=exc.operation, code=exc.code)
     except FinTSOperationError as exc:
@@ -343,6 +512,8 @@ def _transfer_handler(client: PyFinIntegrationClient, params: dict[str, Any]):
         amount=params["amount"],
         purpose=params["purpose"],
         endtoend_id=params.get("endtoend_id"),
+        instant_payment=params.get("instant_payment"),
+        execution_date=params.get("execution_date"),
     )
 
 
@@ -403,6 +574,13 @@ def transactions(payload: dict[str, Any]):
 
 @app.post("/transfer", response_model=TransferResponseModel, responses=COMMON_ERROR_RESPONSES)
 def transfer(payload: dict[str, Any]):
+    execution_date = _optional_iso_date(payload.get("execution_date"), "execution_date")
+    if execution_date is not None and execution_date < dt.date.today():
+        return _validation_response(
+            message="execution_date must be today or later",
+            field="execution_date",
+            operation="transfer",
+        )
     return _handle_client_operation(
         payload,
         operation="transfer",
@@ -415,22 +593,14 @@ def transfer(payload: dict[str, Any]):
             "amount": payload.get("amount"),
             "purpose": payload.get("purpose"),
             "endtoend_id": payload.get("endtoend_id"),
+            "instant_payment": payload.get("instant_payment"),
+            "execution_date": execution_date,
         },
         handler=OPERATION_HANDLERS["transfer"],
     )
 
 
-@app.post(
-    "/transfer/retry-with-name",
-    response_model=TransferResponseModel | ConfirmationPendingResponseModel | TanRequiredResponseModel,
-    responses={
-        400: {"model": ValidationErrorResponseModel, "description": "Invalid request payload"},
-        404: {"model": NotFoundResponseModel, "description": "Session not found or expired"},
-        409: {"model": TanRequiredResponseModel, "description": "Further confirmation required"},
-        502: {"model": FinTSErrorResponseModel, "description": "FinTS/provider error"},
-    },
-)
-def retry_transfer_with_name(payload: dict[str, Any]):
+def _retry_transfer_with_name_local(payload: dict[str, Any]):
     _prune_sessions()
     session_id = payload.get("session_id")
     recipient_name = str(payload.get("recipient_name") or "").strip()
@@ -458,6 +628,9 @@ def retry_transfer_with_name(payload: dict[str, Any]):
     old_client: PyFinIntegrationClient = session.get("client")
     params = dict(session.get("params") or {})
     params["recipient_name"] = recipient_name
+    transfer_overview = _transfer_overview_from_params(params)
+    if transfer_overview is not None:
+        params["transfer_overview"] = transfer_overview
     append_operation_step_log(
         "transfer",
         "retry_with_name_requested",
@@ -491,7 +664,6 @@ def retry_transfer_with_name(payload: dict[str, Any]):
             {
                 "session_id": session_id,
                 "state": _session_state_from_challenge(exc.challenge.to_dict()),
-                "message": exc.message,
                 "retry_with_name": True,
             },
         )
@@ -500,6 +672,7 @@ def retry_transfer_with_name(payload: dict[str, Any]):
             operation=exc.operation,
             message=exc.message,
             challenge=exc.challenge.to_dict(),
+            transfer_overview=_transfer_overview_from_params(params),
         )
     except VOPRequiredError as exc:
         append_operation_step_log(
@@ -508,7 +681,6 @@ def retry_transfer_with_name(payload: dict[str, Any]):
             {
                 "session_id": session_id,
                 "state": SESSION_STATE_AWAITING_VOP,
-                "message": exc.message,
                 "vop_result": exc.challenge.result,
                 "close_match_name": exc.challenge.close_match_name,
                 "other_identification": exc.challenge.other_identification,
@@ -521,11 +693,33 @@ def retry_transfer_with_name(payload: dict[str, Any]):
             operation=exc.operation,
             message=exc.message,
             vop=exc.challenge.to_dict(),
+            transfer_overview=_transfer_overview_from_params(params),
         )
     except FinTSValidationError as exc:
         _mark_session_state(session_id, SESSION_STATE_FAILED, message=exc.message)
         _close_session(session_id)
         return _validation_response(message=exc.message, field=exc.field, operation=exc.operation, code=exc.code)
+    except FinTSCapabilityError as exc:
+        append_operation_step_log(
+            "transfer",
+            "capability_failed",
+            {
+                "session_id": session_id,
+                "product": exc.product,
+                "message": exc.message,
+                "execution_date": exc.execution_date,
+                "instant_payment": exc.instant_payment,
+            },
+        )
+        _mark_session_state(session_id, SESSION_STATE_FAILED, message=exc.message)
+        _close_session(session_id)
+        return _capability_response(
+            operation=exc.operation,
+            product=exc.product,
+            message=exc.message,
+            execution_date=exc.execution_date,
+            instant_payment=exc.instant_payment,
+        )
     except FinTSOperationError as exc:
         append_operation_step_log(
             "transfer",
@@ -547,17 +741,88 @@ def retry_transfer_with_name(payload: dict[str, Any]):
 
 
 @app.post(
-    "/confirm",
-    response_model=list[AccountSummaryResponseModel] | list[AccountTransactionsResponseModel] | TransferResponseModel | ConfirmationPendingResponseModel,
+    "/transfer/retry-with-name",
+    response_model=TransferResponseModel | ConfirmationPendingResponseModel | TanRequiredResponseModel | UnsupportedTransferProductResponseModel,
     responses={
         400: {"model": ValidationErrorResponseModel, "description": "Invalid request payload"},
         404: {"model": NotFoundResponseModel, "description": "Session not found or expired"},
-        409: {"model": TanRequiredResponseModel, "description": "TAN challenge required"},
-        500: {"model": UnknownOperationResponseModel, "description": "Unknown session operation"},
+        409: {"model": TanRequiredResponseModel, "description": "Further confirmation required"},
+        422: {"model": UnsupportedTransferProductResponseModel, "description": "Unsupported bank transfer product"},
         502: {"model": FinTSErrorResponseModel, "description": "FinTS/provider error"},
     },
 )
-def confirm(payload: dict[str, Any]):
+def retry_transfer_with_name(payload: dict[str, Any]):
+    session_id = str(payload.get("session_id") or "").strip()
+    if not session_id:
+        return _validation_response(message="missing session_id", field="session_id", operation="transfer")
+    return _retry_transfer_with_name_local(payload)
+
+
+def _get_session_local(session_id: str):
+    _prune_sessions()
+    session = SESSIONS.get(session_id)
+    if not session:
+        return JSONResponse(status_code=404, content={"error": "not_found", "message": "session not found or expired"})
+    return _session_response(200, **_session_snapshot(session_id, session))
+
+
+@app.get(
+    "/sessions/{session_id}",
+    response_model=SessionInfoResponseModel | NotFoundResponseModel,
+    responses={
+        404: {"model": NotFoundResponseModel, "description": "Session not found or expired"},
+    },
+)
+def get_session(session_id: str):
+    return _get_session_local(session_id)
+
+
+def _cancel_session_local(session_id: str):
+    _prune_sessions()
+    session = SESSIONS.get(session_id)
+    if not session:
+        return JSONResponse(status_code=404, content={"error": "not_found", "message": "session not found or expired"})
+
+    append_operation_step_log(
+        "session",
+        "cancel_requested",
+        {
+            "session_id": session_id,
+            "operation": session.get("operation"),
+            "state": session.get("state"),
+        },
+    )
+    operation = session.get("operation")
+    _close_session(session_id)
+    append_operation_step_log(
+        "session",
+        "cancel_completed",
+        {
+            "session_id": session_id,
+            "operation": operation,
+        },
+    )
+    return _session_response(
+        200,
+        status="cancelled",
+        session_id=session_id,
+        operation=operation,
+        message="session cancelled",
+    )
+
+
+@app.delete(
+    "/sessions/{session_id}",
+    response_model=SessionCancelResponseModel | NotFoundResponseModel,
+    responses={
+        404: {"model": NotFoundResponseModel, "description": "Session not found or expired"},
+    },
+)
+def cancel_session(session_id: str):
+    return _cancel_session_local(session_id)
+
+
+def _confirm_local(payload: dict[str, Any]):
     _prune_sessions()
     session_id = payload.get("session_id")
     tan = payload.get("tan", "")
@@ -618,6 +883,28 @@ def confirm(payload: dict[str, Any]):
             chall, vop, submit_result = client.approve_vop()
         else:
             chall, vop, submit_result = client.confirm_pending(tan)
+    except FinTSCapabilityError as exc:
+        append_operation_step_log(
+            "confirm",
+            "capability_failed",
+            {
+                "session_id": session_id,
+                "resume_operation": operation,
+                "product": exc.product,
+                "message": exc.message,
+                "execution_date": exc.execution_date,
+                "instant_payment": exc.instant_payment,
+            },
+        )
+        _mark_session_state(session_id, SESSION_STATE_FAILED, message=exc.message)
+        _close_session(session_id)
+        return _capability_response(
+            operation=exc.operation,
+            product=exc.product,
+            message=exc.message,
+            execution_date=exc.execution_date,
+            instant_payment=exc.instant_payment,
+        )
     except FinTSOperationError as exc:
         append_operation_step_log(
             "confirm",
@@ -631,14 +918,13 @@ def confirm(payload: dict[str, Any]):
             },
         )
         _mark_session_state(session_id, SESSION_STATE_FAILED, message=exc.message)
-        SESSIONS.pop(session_id, None)
+        _close_session(session_id)
         return _session_response(
             502,
             error="fints_error",
             operation=exc.operation,
             message=exc.message,
         )
-
     if chall:
         challenge = chall.to_dict()
         state = _session_state_from_challenge(challenge)
@@ -656,6 +942,7 @@ def confirm(payload: dict[str, Any]):
             operation=operation,
             message=challenge.get("message"),
             challenge=challenge,
+            transfer_overview=_transfer_overview_from_params(params),
             status_code=202 if state == SESSION_STATE_AWAITING_DECOUPLED else 409,
         )
 
@@ -679,10 +966,15 @@ def confirm(payload: dict[str, Any]):
             operation=operation,
             message=vop_payload.get("message"),
             vop=vop_payload,
+            transfer_overview=_transfer_overview_from_params(params),
         )
 
     if submit_result is not None and operation == "transfer" and looks_like_transfer_result(submit_result):
-        transfer_result = client.transfer_response_from_result(submit_result, params)
+        transfer_result = client.transfer_response_from_result(
+            submit_result,
+            params,
+            transfer_overview=_transfer_overview_from_params(params),
+        )
         append_operation_step_log(
             "confirm",
             "resume_completed",
@@ -695,7 +987,7 @@ def confirm(payload: dict[str, Any]):
             },
         )
         _mark_session_state(session_id, SESSION_STATE_COMPLETED)
-        SESSIONS.pop(session_id, None)
+        _close_session(session_id)
         return _serialize_result(transfer_result)
 
     append_operation_step_log(
@@ -732,7 +1024,7 @@ def confirm(payload: dict[str, Any]):
                 },
             )
             _mark_session_state(session_id, SESSION_STATE_FAILED, message="Unknown session operation")
-            SESSIONS.pop(session_id, None)
+            _close_session(session_id)
             return _session_response(
                 500,
                 error="unknown_operation",
@@ -750,7 +1042,7 @@ def confirm(payload: dict[str, Any]):
             },
         )
         _mark_session_state(session_id, SESSION_STATE_COMPLETED)
-        SESSIONS.pop(session_id, None)
+        _close_session(session_id)
         return _serialize_result(result)
     except TanRequiredError as exc:
         append_operation_step_log(
@@ -759,7 +1051,6 @@ def confirm(payload: dict[str, Any]):
             {
                 "session_id": session_id,
                 "resume_operation": operation,
-                "message": exc.message,
             },
         )
         return _tan_required_session_response(
@@ -767,6 +1058,7 @@ def confirm(payload: dict[str, Any]):
             operation=exc.operation,
             message=exc.message,
             challenge=exc.challenge.to_dict(),
+            transfer_overview=_transfer_overview_from_params(params) if operation == "transfer" else None,
         )
     except VOPRequiredError as exc:
         append_operation_step_log(
@@ -775,7 +1067,6 @@ def confirm(payload: dict[str, Any]):
             {
                 "session_id": session_id,
                 "resume_operation": operation,
-                "message": exc.message,
                 "vop_result": exc.challenge.result,
                 "close_match_name": exc.challenge.close_match_name,
                 "other_identification": exc.challenge.other_identification,
@@ -787,6 +1078,7 @@ def confirm(payload: dict[str, Any]):
             operation=exc.operation,
             message=exc.message,
             vop=exc.challenge.to_dict(),
+            transfer_overview=_transfer_overview_from_params(params) if operation == "transfer" else None,
         )
     except FinTSValidationError as exc:
         append_operation_step_log(
@@ -800,7 +1092,7 @@ def confirm(payload: dict[str, Any]):
             },
         )
         _mark_session_state(session_id, SESSION_STATE_FAILED, message=exc.message)
-        SESSIONS.pop(session_id, None)
+        _close_session(session_id)
         return _validation_response(message=exc.message, field=exc.field, operation=exc.operation, code=exc.code)
     except FinTSOperationError as exc:
         append_operation_step_log(
@@ -815,10 +1107,29 @@ def confirm(payload: dict[str, Any]):
             },
         )
         _mark_session_state(session_id, SESSION_STATE_FAILED, message=exc.message)
-        SESSIONS.pop(session_id, None)
+        _close_session(session_id)
         return _session_response(
             502,
             error="fints_error",
             operation=exc.operation,
             message=exc.message,
         )
+
+
+@app.post(
+    "/confirm",
+    response_model=list[AccountSummaryResponseModel] | list[AccountTransactionsResponseModel] | TransferResponseModel | ConfirmationPendingResponseModel | UnsupportedTransferProductResponseModel,
+    responses={
+        400: {"model": ValidationErrorResponseModel, "description": "Invalid request payload"},
+        404: {"model": NotFoundResponseModel, "description": "Session not found or expired"},
+        409: {"model": TanRequiredResponseModel, "description": "TAN challenge required"},
+        500: {"model": UnknownOperationResponseModel, "description": "Unknown session operation"},
+        422: {"model": UnsupportedTransferProductResponseModel, "description": "Unsupported bank transfer product"},
+        502: {"model": FinTSErrorResponseModel, "description": "FinTS/provider error"},
+    },
+)
+def confirm(payload: dict[str, Any]):
+    session_id = str(payload.get("session_id") or "").strip()
+    if not session_id:
+        return _validation_response(message="missing session_id", field="session_id", operation="confirm")
+    return _confirm_local(payload)

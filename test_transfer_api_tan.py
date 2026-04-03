@@ -27,6 +27,8 @@ def main() -> int:
         "purpose": require_env("FINTS_TRANSFER_PURPOSE"),
         "recipient_bic": os.getenv("FINTS_TRANSFER_RECIPIENT_BIC"),
         "endtoend_id": os.getenv("FINTS_TRANSFER_ENDTOEND_ID"),
+        "instant_payment": os.getenv("FINTS_TRANSFER_INSTANT_PAYMENT"),
+        "execution_date": os.getenv("FINTS_TRANSFER_EXECUTION_DATE"),
     }
 
     status, response_payload = post_json(

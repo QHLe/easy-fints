@@ -5,8 +5,11 @@ This document describes the end-to-end transfer flow implemented by the REST wra
 Key points:
 
 - local request validation happens before any bank request is sent
+- the same API flow is used for standard SEPA transfers, instant payments, and dated transfers; `instant_payment=true` or `execution_date=...` only changes the FinTS payment payload requested from the bank
+- the same structured `transfer_overview` payload is included in the initial transfer challenge response, later `/confirm` responses, and the final `TransferResponse`
 - `/confirm` is the single continuation endpoint for TAN input, decoupled app polling, and VoP approval
 - if the bank requires payee verification, the API returns `vop_required` with `state=awaiting_vop`
+- active confirmation sessions can be cancelled with `DELETE /sessions/{session_id}`
 - `POST /transfer/retry-with-name` keeps the same `session_id` and tries to reuse the current FinTS client/dialog when possible
 - reusing the dialog can save a dialog bootstrap/login step, but the bank may still require another VoP or decoupled confirmation for the corrected payment order
 

@@ -36,6 +36,24 @@ class FinTSValidationError(FinTSOperationError):
         self.code = code
 
 
+class FinTSCapabilityError(FinTSOperationError):
+    """Raised when the bank or client does not support the requested transfer product."""
+
+    def __init__(
+        self,
+        operation: str,
+        product: str,
+        message: str,
+        *,
+        execution_date: Optional[str] = None,
+        instant_payment: Optional[bool] = None,
+    ):
+        super().__init__(operation, message)
+        self.product = product
+        self.execution_date = execution_date
+        self.instant_payment = instant_payment
+
+
 class TanRequiredError(FinTSOperationError):
     """Raised when an operation requires TAN confirmation."""
 

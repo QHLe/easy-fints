@@ -21,6 +21,14 @@ def serialize_value(value: Any) -> Any:
     return str(value)
 
 
+def _mask_identifier_for_log(value: str) -> str:
+    if not value:
+        return value
+    if len(value) <= 4:
+        return "*" * len(value)
+    return f"{value[:2]}{'*' * (len(value) - 4)}{value[-2:]}"
+
+
 @dataclass(slots=True)
 class FinTSConfig:
     user: str
@@ -55,6 +63,8 @@ class FinTSConfig:
         data = asdict(self)
         if data.get("pin"):
             data["pin"] = "***"
+        if data.get("user"):
+            data["user"] = _mask_identifier_for_log(str(data["user"]))
         return data
 
 
@@ -260,6 +270,7 @@ class TransferResponse:
     purpose: str
     endtoend_id: str
     bank_responses: list[dict[str, Any]]
+    transfer_overview: Optional[dict[str, Any]] = None
 
     @classmethod
     def from_fints_response(
@@ -273,6 +284,7 @@ class TransferResponse:
         recipient_bic: Optional[str],
         purpose: str,
         endtoend_id: str,
+        transfer_overview: Optional[dict[str, Any]] = None,
     ) -> "TransferResponse":
         response_status = serialize_value(getattr(getattr(response, "status", None), "name", None)) or "UNKNOWN"
         bank_responses = []
@@ -302,6 +314,7 @@ class TransferResponse:
             purpose=purpose,
             endtoend_id=endtoend_id,
             bank_responses=bank_responses,
+            transfer_overview=transfer_overview,
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -483,6 +496,19 @@ class VOPChallengeResponseModel(BaseModel):
     raw_repr: Optional[str] = None
 
 
+class TransferSummaryResponseModel(BaseModel):
+    source_account_label: str
+    recipient_name: str
+    recipient_iban: str
+    recipient_bic: Optional[str]
+    amount: str
+    currency: str
+    purpose: str
+    endtoend_id: str
+    instant_payment: bool
+    execution_date: Optional[str] = None
+
+
 class TanRequiredResponseModel(BaseModel):
     error: str
     session_id: str
@@ -492,6 +518,7 @@ class TanRequiredResponseModel(BaseModel):
     message: Optional[str] = None
     challenge: Optional[TanChallengeResponseModel] = None
     vop: Optional[VOPChallengeResponseModel] = None
+    transfer_overview: Optional[TransferSummaryResponseModel] = None
 
 
 class ConfirmationPendingResponseModel(BaseModel):
@@ -503,6 +530,7 @@ class ConfirmationPendingResponseModel(BaseModel):
     message: Optional[str] = None
     challenge: Optional[TanChallengeResponseModel] = None
     vop: Optional[VOPChallengeResponseModel] = None
+    transfer_overview: Optional[TransferSummaryResponseModel] = None
 
 
 class ValidationErrorResponseModel(BaseModel):
@@ -518,6 +546,54 @@ class TransferBankResponseModel(BaseModel):
     reference: Optional[str]
 
 
+@dataclass(slots=True)
+class TransferSummary:
+    source_account_label: str
+    recipient_name: str
+    recipient_iban: str
+    recipient_bic: Optional[str]
+    amount: str
+    currency: str
+    purpose: str
+    endtoend_id: str
+    instant_payment: bool
+    execution_date: Optional[str] = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+class UnsupportedTransferProductResponseModel(BaseModel):
+    error: str
+    operation: str
+    product: str
+    message: str
+    execution_date: Optional[str] = None
+    instant_payment: Optional[bool] = None
+
+
+class SessionCancelResponseModel(BaseModel):
+    status: str
+    session_id: str
+    operation: Optional[str] = None
+    message: Optional[str] = None
+
+
+class SessionInfoResponseModel(BaseModel):
+    session_id: str
+    operation: Optional[str] = None
+    state: str
+    next_action: str
+    message: Optional[str] = None
+    created_at: str
+    updated_at: Optional[str] = None
+    expires_at: str
+    expires_in_seconds: int
+    challenge: Optional[TanChallengeResponseModel] = None
+    vop: Optional[VOPChallengeResponseModel] = None
+    transfer_overview: Optional[TransferSummaryResponseModel] = None
+
+
 class TransferResponseModel(BaseModel):
     status: str
     success: bool
@@ -531,6 +607,7 @@ class TransferResponseModel(BaseModel):
     purpose: str
     endtoend_id: str
     bank_responses: list[TransferBankResponseModel]
+    transfer_overview: Optional[TransferSummaryResponseModel] = None
 
 
 class FinTSErrorResponseModel(BaseModel):

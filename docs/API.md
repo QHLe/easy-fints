@@ -121,7 +121,9 @@ Request body:
   "recipient_bic": "ABCDEFGHXXX",
   "amount": "12.34",
   "purpose": "Invoice 123",
-  "endtoend_id": "INV-123"
+  "endtoend_id": "INV-123",
+  "instant_payment": false,
+  "execution_date": "2026-04-10"
 }
 ```
 
@@ -130,16 +132,40 @@ Notes:
 - `source_account` is matched against the local SEPA account list, typically by IBAN
 - `account_name` is the sender account holder name required by `python-fints.simple_sepa_transfer(...)`
 - `recipient_bic` is optional for domestic/SEPA cases where the bank accepts IBAN-only routing
+- `instant_payment` defaults to `false`; set it to `true` to request an SCT Inst / SEPA instant payment
+- `execution_date` is optional; if set, the wrapper builds a dated SEPA transfer request for that `YYYY-MM-DD` date
+- `instant_payment` and `execution_date` cannot be combined
 - `amount` must be a EUR amount between `0.01` and `999999999.99` with at most 2 decimal places
 - `purpose` must be at most 140 characters and use a conservative SEPA-safe character set: letters, digits, spaces, and `/ - ? : ( ) . , ' +`
 - name-to-IBAN matching is not validated locally; that remains bank-/channel-dependent
+- the bank must support instant payments for the selected account; otherwise the request may fail with a FinTS/provider error
+- non-final transfer responses and the final `200` transfer response include a structured `transfer_overview` payload with the payment details
 
 Responses:
 
 - `200`: `TransferResponse`
 - `400`: invalid or incomplete config
 - `409`: TAN or VoP confirmation required
+- `422`: unsupported transfer product
 - `502`: FinTS/provider error
+
+### `GET /sessions/{session_id}`
+
+Inspect an active confirmation session without changing it.
+
+Responses:
+
+- `200`: session metadata including state, next action, expiry, optional challenge/VoP details, and `transfer_overview` for transfer sessions
+- `404`: session not found or expired
+
+### `DELETE /sessions/{session_id}`
+
+Cancel an active confirmation session.
+
+Responses:
+
+- `200`: session cancelled and the stored FinTS client closed
+- `404`: session not found or expired
 
 ### `POST /transfer/retry-with-name`
 
@@ -205,8 +231,26 @@ Responses:
 - `400`: missing `session_id`
 - `404`: session not found or expired
 - `409`: another TAN or VoP challenge is required
+- `422`: unsupported transfer product
 - `500`: unknown stored operation
 - `502`: FinTS/provider error
+
+For transfer sessions, the `409`/`202` confirmation responses and the final `200` transfer response can include the same structured `transfer_overview` payload:
+
+```json
+{
+  "source_account_label": "DE...",
+  "recipient_name": "Acme GmbH",
+  "recipient_iban": "DE...",
+  "recipient_bic": null,
+  "amount": "12.34",
+  "currency": "EUR",
+  "purpose": "Invoice 123",
+  "endtoend_id": "INV-123",
+  "instant_payment": false,
+  "execution_date": "2026-04-10"
+}
+```
 
 ## TAN Flow
 
@@ -268,9 +312,14 @@ Continue that flow with:
 
 Sessions are:
 
-- stored in memory
-- local to one process
-- expired after `300` seconds
+- stored as live FinTS dialog state in process-local memory
+- expired after `300` seconds by default
+
+The session TTL can be configured via `FINTS_SESSION_TTL_SECONDS`.
+
+Relevant runtime env vars:
+
+- `FINTS_SESSION_TTL_SECONDS`
 
 Session state values currently used by the API:
 
@@ -279,6 +328,58 @@ Session state values currently used by the API:
 - `awaiting_vop`: inspect the `vop` payload and call `/confirm` with `approve_vop: true`, or restart with `/transfer/retry-with-name`
 - `running` and `resuming`: transient internal states while the server continues the FinTS flow
 - `completed` and `failed`: terminal states; the session is then removed
+
+### `SessionInfoResponse`
+
+```json
+{
+  "session_id": "<uuid>",
+  "operation": "transfer",
+  "state": "awaiting_decoupled",
+  "next_action": "confirm",
+  "message": "TAN confirmation required",
+  "created_at": "2026-04-03T12:00:00.000000",
+  "updated_at": "2026-04-03T12:01:30.000000",
+  "expires_at": "2026-04-03T12:06:30.000000",
+  "expires_in_seconds": 299,
+  "challenge": {
+    "message": "Please confirm in your banking app.",
+    "decoupled": true,
+    "has_html": false,
+    "has_raw": false,
+    "has_matrix": false,
+    "has_hhduc": false,
+    "image_mime_type": null,
+    "image_base64": null
+  },
+  "vop": null,
+  "transfer_overview": {
+    "source_account_label": "DE...",
+    "recipient_name": "Acme GmbH",
+    "recipient_iban": "DE...",
+    "recipient_bic": null,
+    "amount": "12.34",
+    "currency": "EUR",
+    "purpose": "Invoice 123",
+    "endtoend_id": "INV-123",
+    "instant_payment": false,
+    "execution_date": null
+  }
+}
+```
+
+### `UnsupportedTransferProductResponse`
+
+```json
+{
+  "error": "unsupported_transfer_product",
+  "operation": "transfer",
+  "product": "instant_payment",
+  "message": "No supported HKIPZ version found. I support (1,), bank supports ()",
+  "execution_date": null,
+  "instant_payment": true
+}
+```
 
 ## Data Shapes
 
@@ -364,6 +465,18 @@ Session state values currently used by the API:
   "recipient_bic": "ABCDEFGHXXX",
   "purpose": "Invoice 123",
   "endtoend_id": "INV-123",
+  "transfer_overview": {
+    "source_account_label": "DE...",
+    "recipient_name": "Acme GmbH",
+    "recipient_iban": "DE...",
+    "recipient_bic": "ABCDEFGHXXX",
+    "amount": "12.34",
+    "currency": "EUR",
+    "purpose": "Invoice 123",
+    "endtoend_id": "INV-123",
+    "instant_payment": false,
+    "execution_date": "2026-04-10"
+  },
   "bank_responses": [
     {
       "code": "0010",

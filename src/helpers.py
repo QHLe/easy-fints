@@ -7,7 +7,6 @@ import datetime as dt
 import json
 import logging
 import os
-import time
 from pathlib import Path
 from typing import Any, Iterable, Optional, Union
 
@@ -30,6 +29,49 @@ CONFIG_ENV_VARS = {
 _RUNTIME_PATCHES_APPLIED = False
 SEPA_BASIC_ALLOWED_CHARS = frozenset(
     "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 /-?:().,'+"
+)
+LOG_REDACTED = "[redacted]"
+LOG_MASKED = "[masked]"
+LOG_REDACT_KEYS = frozenset(
+    {
+        "pin",
+        "tan",
+        "image_base64",
+        "challenge_html",
+        "challenge_raw",
+        "raw",
+        "raw_repr",
+    }
+)
+LOG_MASKED_NAME_KEYS = frozenset(
+    {
+        "account_name",
+        "recipient_name",
+        "counterparty_name",
+        "close_match_name",
+        "other_identification",
+    }
+)
+LOG_IBAN_KEYS = frozenset(
+    {
+        "source_account",
+        "source_account_label",
+        "recipient_iban",
+        "counterparty_iban",
+        "iban",
+        "account_label",
+    }
+)
+LOG_TOKEN_MASK_KEYS = frozenset(
+    {
+        "user",
+        "user_id",
+        "customer_id",
+        "account_number",
+        "subaccount_number",
+        "bank_identifier",
+        "endtoend_id",
+    }
 )
 
 
@@ -102,8 +144,6 @@ def apply_runtime_patches() -> None:
         _patch_is_challenge_structured()
     if os.getenv("FINTS_DISABLE_BOOTSTRAP_PATCH") != "1":
         _patch_minimal_bootstrap()
-    if _as_bool(os.getenv("FINTS_ENABLE_RAW_MESSAGE_LOG")):
-        _patch_connection_send_logging()
 
     _patch_balance_conversions()
     _RUNTIME_PATCHES_APPLIED = True
@@ -131,67 +171,6 @@ def _patch_minimal_bootstrap() -> None:
         promote_two_step_tan(client, prefer_single_only=True)
 
     fints_utils.minimal_interactive_cli_bootstrap = patched_bootstrap
-
-
-def _patch_connection_send_logging() -> None:
-    try:
-        from fints.connection import FinTSHTTPSConnection
-        from fints.exceptions import FinTSConnectionError
-        from fints.message import FinTSInstituteMessage, FinTSMessage
-    except Exception:
-        return
-
-    def patched_send(self, msg: FinTSMessage):
-        log_dir = Path("logs")
-        try:
-            log_dir.mkdir(parents=True, exist_ok=True)
-        except Exception:
-            pass
-        log_path = log_dir / "raw_messages.log"
-
-        try:
-            out_bytes = msg.render_bytes()
-        except Exception:
-            out_bytes = None
-
-        try:
-            with open(log_path, "ab") as fh:
-                fh.write(b"---\n")
-                fh.write(f"TIME: {time.time()}\n".encode("utf-8"))
-                if out_bytes is not None:
-                    fh.write(b"OUTGOING (base64):\n")
-                    fh.write(base64.b64encode(out_bytes) + b"\n")
-                else:
-                    fh.write(b"OUTGOING: <render failed>\n")
-        except Exception:
-            pass
-
-        response = self.session.post(
-            self.url,
-            data=base64.b64encode(out_bytes or b""),
-            headers={"Content-Type": "text/plain"},
-        )
-        if response.status_code < 200 or response.status_code > 299:
-            raise FinTSConnectionError(f"Bad status code {response.status_code}")
-
-        try:
-            incoming = base64.b64decode(response.content.decode("iso-8859-1"))
-        except Exception:
-            incoming = None
-
-        try:
-            with open(log_path, "ab") as fh:
-                if incoming is not None:
-                    fh.write(b"INCOMING (base64):\n")
-                    fh.write(base64.b64encode(incoming) + b"\n")
-                else:
-                    fh.write(b"INCOMING: <decode failed>\n")
-        except Exception:
-            pass
-
-        return FinTSInstituteMessage(segments=incoming)
-
-    FinTSHTTPSConnection.send = patched_send
 
 
 def _patch_balance_conversions() -> None:
@@ -254,7 +233,7 @@ def create_client(cfg: dict[str, Any]) -> FinTS3PinTanClient:
     bank_identifier = cfg.get("bank")
     if not bank_identifier:
         raise RuntimeError("Missing bank identifier: provide 'bank' in config")
-    logger.info("Creating FinTS client for bank=%s user=%s server=%s", bank_identifier, cfg.get("user"), cfg.get("server"))
+    logger.info("Creating FinTS client for bank=%s server=%s", bank_identifier, cfg.get("server"))
 
     # Build optional constructor kwargs and validate product_version length.
     constructor_kwargs: dict[str, Any] = {}
@@ -663,6 +642,48 @@ def append_operation_log(operation: str, payload: dict[str, Any]) -> Path:
     return append_operation_step_log(operation, "completed", payload)
 
 
+def _mask_middle(value: Any, *, visible_start: int = 2, visible_end: int = 2) -> str:
+    text = str(value or "")
+    if not text:
+        return text
+    if len(text) <= visible_start + visible_end:
+        return "*" * len(text)
+    return f"{text[:visible_start]}{'*' * (len(text) - visible_start - visible_end)}{text[-visible_end:]}"
+
+
+def _mask_iban_for_log(value: Any) -> str:
+    iban = compact_iban(str(value or ""))
+    if not iban:
+        return iban
+    if len(iban) <= 8:
+        return _mask_middle(iban, visible_start=2, visible_end=2)
+    return f"{iban[:4]}{'*' * (len(iban) - 8)}{iban[-4:]}"
+
+
+def _sanitize_log_value(key: str, value: Any) -> Any:
+    if isinstance(value, dict):
+        return {sub_key: _sanitize_log_value(str(sub_key), sub_value) for sub_key, sub_value in value.items()}
+    if isinstance(value, list):
+        return [_sanitize_log_value(key, item) for item in value]
+    if value is None:
+        return None
+
+    lowered = key.lower()
+    if lowered in LOG_REDACT_KEYS or lowered.endswith("_raw") or lowered.endswith("_html"):
+        return LOG_REDACTED
+    if lowered in LOG_MASKED_NAME_KEYS:
+        return LOG_MASKED
+    if lowered in LOG_IBAN_KEYS or lowered.endswith("_iban"):
+        return _mask_iban_for_log(value)
+    if lowered in LOG_TOKEN_MASK_KEYS:
+        return _mask_middle(value)
+    return value
+
+
+def sanitize_log_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    return {key: _sanitize_log_value(str(key), value) for key, value in payload.items()}
+
+
 def append_operation_step_log(operation: str, stage: str, payload: dict[str, Any]) -> Path:
     """Append a step-level JSONL record for an operation under `logs/`."""
     log_dir = Path("logs")
@@ -672,7 +693,7 @@ def append_operation_step_log(operation: str, stage: str, payload: dict[str, Any
         "timestamp": dt.datetime.now(dt.timezone.utc).isoformat(),
         "operation": operation,
         "stage": stage,
-        **payload,
+        **sanitize_log_payload(payload),
     }
     with log_path.open("a", encoding="utf-8") as fh:
         fh.write(json.dumps(record, ensure_ascii=False))
