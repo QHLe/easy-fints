@@ -7,8 +7,8 @@ from types import SimpleNamespace
 
 from fastapi.responses import JSONResponse
 
-from src.exceptions import FinTSCapabilityError, TanRequiredError, VOPRequiredError
-from src.models import (
+from fints_rest_wrapper.exceptions import FinTSCapabilityError, TanRequiredError, VOPRequiredError
+from fints_rest_wrapper.models import (
     AccountSummary,
     AccountTransactions,
     TanChallenge,

@@ -11,7 +11,7 @@ It currently supports:
 - TAN / decoupled confirmation over HTTP
 - payee verification (`VoP`) continuation
 
-The ASGI entrypoint is [src/fastapi_app.py](/home/bomay/git/python-fints-REST-wrapper/src/fastapi_app.py).
+The ASGI entrypoint is [fints_rest_wrapper/fastapi_app.py](/home/bomay/git/python-fints-REST-wrapper/fints_rest_wrapper/fastapi_app.py).
 
 ## Quick Start
 
@@ -21,12 +21,12 @@ Requirements:
 - a bank account with FinTS/HBCI access
 - valid FinTS credentials and server URL
 
-Create a virtualenv and install dependencies:
+Create a virtualenv and install the package with development dependencies:
 
 ```bash
 python -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
+pip install -e .[dev]
 ```
 
 Minimal `.env`:
@@ -41,7 +41,7 @@ FINTS_SESSION_TTL_SECONDS=300
 Start the API:
 
 ```bash
-uvicorn src.fastapi_app:app --reload --host 0.0.0.0 --port 8000
+uvicorn fints_rest_wrapper.fastapi_app:app --reload --host 0.0.0.0 --port 8000
 ```
 
 OpenAPI:
@@ -165,22 +165,44 @@ High-level testing/verification notes:
 
 Important files:
 
-- [src/fastapi_app.py](/home/bomay/git/python-fints-REST-wrapper/src/fastapi_app.py)
-- [src/client.py](/home/bomay/git/python-fints-REST-wrapper/src/client.py)
-- [src/helpers.py](/home/bomay/git/python-fints-REST-wrapper/src/helpers.py)
-- [src/models.py](/home/bomay/git/python-fints-REST-wrapper/src/models.py)
+- [fints_rest_wrapper/fastapi_app.py](/home/bomay/git/python-fints-REST-wrapper/fints_rest_wrapper/fastapi_app.py)
+- [fints_rest_wrapper/client.py](/home/bomay/git/python-fints-REST-wrapper/fints_rest_wrapper/client.py)
+- [fints_rest_wrapper/helpers.py](/home/bomay/git/python-fints-REST-wrapper/fints_rest_wrapper/helpers.py)
+- [fints_rest_wrapper/models.py](/home/bomay/git/python-fints-REST-wrapper/fints_rest_wrapper/models.py)
 
 Basic checks:
 
 ```bash
-python -m compileall src api_tan_test_helper.py test_accounts_api_tan.py test_balance_api_tan.py test_transactions_api_tan.py test_single_account_api_tan.py test_transfer_api_tan.py
+python -m compileall fints_rest_wrapper api_tan_test_helper.py test_accounts_api_tan.py test_balance_api_tan.py test_transactions_api_tan.py test_single_account_api_tan.py test_transfer_api_tan.py
 .venv/bin/python -m pytest tests -q
+```
+
+Package build:
+
+```bash
+python -m build
 ```
 
 GitHub Actions:
 
 - CI runs on pushes to `main` and on pull requests
-- releases are created automatically for tags matching `v*`
+- publishing to PyPI runs when a GitHub Release is published
+
+## Packaging
+
+Package name on PyPI:
+
+- `fints-rest-wrapper`
+
+Import package in Python:
+
+- `fints_rest_wrapper`
+
+Install from PyPI after the first published release:
+
+```bash
+pip install fints-rest-wrapper
+```
 
 ## Deployment Notes
 

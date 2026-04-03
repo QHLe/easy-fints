@@ -36,7 +36,7 @@ jobs:
       - name: Compile Python sources
         run: |
           python -m compileall \
-            src \
+            fints_rest_wrapper \
             api_tan_test_helper.py \
             test_accounts_api_tan.py \
             test_balance_api_tan.py \

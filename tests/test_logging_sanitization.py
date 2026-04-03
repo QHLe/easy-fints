@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import json
 
-from src.helpers import append_operation_step_log
-from src.models import FinTSConfig
+from fints_rest_wrapper.helpers import append_operation_step_log
+from fints_rest_wrapper.models import FinTSConfig
 
 
 def test_append_operation_step_log_sanitizes_sensitive_fields(tmp_path, monkeypatch):

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from src import fastapi_app
+from fints_rest_wrapper import fastapi_app
 from tests.support.fake_fints_backend import unwrap_response
 
 
