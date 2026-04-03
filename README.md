@@ -177,6 +177,11 @@ python -m compileall src api_tan_test_helper.py test_accounts_api_tan.py test_ba
 .venv/bin/python -m pytest tests -q
 ```
 
+GitHub Actions:
+
+- CI runs on pushes to `main` and on pull requests
+- releases are created automatically for tags matching `v*`
+
 ## Deployment Notes
 
 This project intentionally keeps the API simple:
