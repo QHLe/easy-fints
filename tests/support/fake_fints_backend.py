@@ -31,7 +31,7 @@ class FakeTransactionResult:
     responses: list[FakeBankResponse]
 
 
-class FakePyFinIntegrationClient:
+class FakeFinTSClient:
     def __init__(self, scenario: str = "transfer_success"):
         self.scenario = scenario
         self.closed = False
@@ -391,7 +391,7 @@ class FakePyFinIntegrationClient:
         )
 
 
-CREATED_CLIENTS: list[FakePyFinIntegrationClient] = []
+CREATED_CLIENTS: list[FakeFinTSClient] = []
 
 
 def unwrap_response(result):

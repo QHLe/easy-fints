@@ -19,7 +19,7 @@ This document tracks behavioral use cases, not the low-level implementation.
 
 The simulation should behave like a deterministic FinTS backend from the point of view of:
 
-- `PyFinIntegrationClient`
+- `FinTSClient`
 - FastAPI endpoints
 - helper scripts
 - API consumers

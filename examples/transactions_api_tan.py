@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 import sys
-from api_tan_test_helper import build_config_payload, confirm_flow, load_dotenv_file, post_json, print_json
+from api_tan_helper import build_config_payload, confirm_flow, load_dotenv_file, post_json, print_json
 
 
 def main() -> int:

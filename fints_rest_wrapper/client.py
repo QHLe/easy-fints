@@ -124,7 +124,7 @@ def coerce_optional_date(value: Any, *, field: str, operation: str) -> Optional[
     raise FinTSValidationError(operation, f"invalid {field}: expected YYYY-MM-DD", field=field)
 
 
-class PyFinIntegrationClient:
+class FinTSClient:
     """Backend-oriented wrapper that returns structured objects instead of printing."""
 
     def __init__(
@@ -141,6 +141,8 @@ class PyFinIntegrationClient:
         self._client = None
         self._pending_tan_response = None
         self._pending_vop_response = None
+        self._pending_transfer_params: Optional[dict[str, Any]] = None
+        self._pending_transfer_overview: Optional[dict[str, Any]] = None
         self.profile_id = profile_id
         self.display_name = display_name
         self.bank_info_path = bank_info_path
@@ -152,7 +154,7 @@ class PyFinIntegrationClient:
         cls,
         env_path: Optional[str] = None,
         overrides: Optional[dict[str, Any]] = None,
-    ) -> "PyFinIntegrationClient":
+    ) -> "FinTSClient":
         try:
             config = FinTSConfig(**load_config(env_path, overrides=overrides))
         except Exception as exc:
@@ -170,7 +172,7 @@ class PyFinIntegrationClient:
         pin: str,
         sepa_profile: Optional[StoredSepaProfile] = None,
         overrides: Optional[dict[str, Any]] = None,
-    ) -> "PyFinIntegrationClient":
+    ) -> "FinTSClient":
         if sepa_profile is not None:
             cfg = sepa_profile.to_client_config(
                 bank_info,
@@ -194,7 +196,7 @@ class PyFinIntegrationClient:
             display_name=sepa_profile.display_name if sepa_profile else None,
         )
 
-    def __enter__(self) -> "PyFinIntegrationClient":
+    def __enter__(self) -> "FinTSClient":
         if self._client is None:
             logger.info("Opening FinTS client: %s", self.config.to_safe_dict())
             self._client = create_client(self.config.to_client_config())
@@ -219,13 +221,43 @@ class PyFinIntegrationClient:
             self._client = None
             self._pending_tan_response = None
             self._pending_vop_response = None
+            self._clear_pending_transfer()
 
     def clear_pending_confirmations(self) -> None:
         """Drop local pending TAN/VoP state before retrying a transfer in the same client context."""
         self._pending_tan_response = None
         self._pending_vop_response = None
+        self._clear_pending_transfer()
         if self._client is not None and getattr(self._client, "init_tan_response", None) is not None:
             self._client.init_tan_response = None
+
+    def _remember_pending_transfer(
+        self,
+        params: dict[str, Any],
+        *,
+        transfer_overview: dict[str, Any] | None = None,
+    ) -> None:
+        self._pending_transfer_params = dict(params)
+        self._pending_transfer_overview = dict(transfer_overview) if transfer_overview is not None else None
+
+    def _clear_pending_transfer(self) -> None:
+        self._pending_transfer_params = None
+        self._pending_transfer_overview = None
+
+    def _finalize_pending_transfer_result(self, result: Any) -> Any:
+        if self._pending_transfer_params is None:
+            return result
+        if looks_like_transfer_result(result):
+            response = self.transfer_response_from_result(
+                result,
+                self._pending_transfer_params,
+                transfer_overview=self._pending_transfer_overview,
+            )
+            self._clear_pending_transfer()
+            return response
+        pending_params = dict(self._pending_transfer_params)
+        self._clear_pending_transfer()
+        return self.initiate_transfer(**pending_params)
 
     def _has_standing_dialog(self) -> bool:
         if self._client is None:
@@ -329,7 +361,7 @@ class PyFinIntegrationClient:
         return [AccountSummary.from_account(account) for account in accounts]
 
     class _ClientScope:
-        def __init__(self, owner: "PyFinIntegrationClient"):
+        def __init__(self, owner: "FinTSClient"):
             self.owner = owner
             self.owned_client = False
             self.entered = False
@@ -626,6 +658,13 @@ class PyFinIntegrationClient:
         self._pending_vop_response = None
         if getattr(self._client, "init_tan_response", None) is not None:
             self._client.init_tan_response = None
+        try:
+            result = self._finalize_pending_transfer_result(result)
+        except TanRequiredError as exc:
+            self._pending_tan_response = getattr(self._client, "init_tan_response", None) or self._pending_tan_response
+            return (exc.challenge, None, None)
+        except VOPRequiredError as exc:
+            return (None, exc.challenge, None)
         append_operation_log(
             "confirm_pending",
             {"status": "completed", "result_type": type(result).__name__},
@@ -689,6 +728,13 @@ class PyFinIntegrationClient:
         self._pending_vop_response = None
         if getattr(self._client, "init_tan_response", None) is not None:
             self._client.init_tan_response = None
+        try:
+            result = self._finalize_pending_transfer_result(result)
+        except TanRequiredError as exc:
+            self._pending_tan_response = getattr(self._client, "init_tan_response", None) or self._pending_tan_response
+            return (exc.challenge, None, None)
+        except VOPRequiredError as exc:
+            return (None, exc.challenge, None)
         append_operation_log(
             "approve_vop",
             {"status": "completed", "result_type": type(result).__name__},
@@ -710,7 +756,7 @@ class PyFinIntegrationClient:
         return TransferResponse.from_fints_response(
             response=result,
             amount=amount_decimal,
-            source_account_label=str(params["source_account"]),
+            source_account_label=str((overview or {}).get("source_account_label") or params["source_account"]),
             recipient_name=str(params["recipient_name"]),
             recipient_iban=compact_iban(params["recipient_iban"]),
             recipient_bic=str(params.get("recipient_bic") or "").strip().upper() or None,
@@ -834,99 +880,102 @@ class PyFinIntegrationClient:
         if amount_decimal > TRANSFER_MAX_AMOUNT:
             raise FinTSValidationError("transfer", "amount must not exceed 999999999.99", field="amount")
 
-        with self._client_scope() as client:
-            append_operation_step_log(
-                "transfer",
-                "started",
-                {
-                    "source_account": source_account,
-                    "recipient_iban": recipient_iban,
-                    "recipient_bic_provided": bool(recipient_bic),
-                    "endtoend_id": endtoend_id,
-                    "instant_payment": instant_payment,
-                    "execution_date": serialize_value(execution_date_value),
-                },
-            )
-            accounts = select_accounts(self._run("list_accounts", list_accounts, client), source_account)
-            if not accounts:
-                raise FinTSValidationError("transfer", "source account not found", field="source_account")
-            if len(accounts) > 1:
-                raise FinTSValidationError("transfer", "source account filter is ambiguous", field="source_account")
+        transfer_params = {
+            "source_account": source_account,
+            "account_name": account_name,
+            "recipient_name": recipient_name,
+            "recipient_iban": recipient_iban,
+            "recipient_bic": recipient_bic,
+            "amount": str(amount_decimal),
+            "purpose": purpose,
+            "endtoend_id": endtoend_id,
+            "instant_payment": instant_payment,
+            "execution_date": execution_date_value,
+        }
+        self._remember_pending_transfer(transfer_params)
 
-            debit_account = accounts[0]
-            transfer_overview = TransferSummary(
-                source_account_label=account_label(debit_account),
-                recipient_name=recipient_name,
-                recipient_iban=recipient_iban,
-                recipient_bic=recipient_bic,
-                amount=str(amount_decimal),
-                currency="EUR",
-                purpose=purpose,
-                endtoend_id=endtoend_id,
-                instant_payment=instant_payment,
-                execution_date=serialize_value(execution_date_value),
-            ).to_dict()
-            transfer_mode = "scheduled_transfer" if execution_date_value is not None else "instant_payment" if instant_payment else "standard_transfer"
-            try:
-                if execution_date_value is None:
-                    result = self._run(
-                        "transfer",
-                        client.simple_sepa_transfer,
-                        debit_account,
-                        recipient_iban,
-                        recipient_bic,
-                        recipient_name,
-                        amount_decimal,
-                        account_name,
-                        purpose,
-                        instant_payment,
-                        endtoend_id,
-                        capability_context=transfer_mode,
-                    )
-                else:
-                    pain_message, pain_descriptor = self._build_sepa_transfer_pain_message(
-                        client=client,
-                        account_name=account_name,
-                        debit_account=debit_account,
-                        recipient_name=recipient_name,
-                        recipient_iban=recipient_iban,
-                        recipient_bic=recipient_bic,
-                        amount_decimal=amount_decimal,
-                        purpose=purpose,
-                        endtoend_id=endtoend_id,
-                        execution_date=execution_date_value,
-                    )
-                    result = self._run(
-                        "transfer",
-                        client.sepa_transfer,
-                        debit_account,
-                        pain_message,
-                        False,
-                        None,
-                        "EUR",
-                        False,
-                        pain_descriptor,
-                        instant_payment,
-                        capability_context=transfer_mode,
-                    )
-            except FinTSCapabilityError as exc:
-                raise FinTSCapabilityError(
+        try:
+            with self._client_scope() as client:
+                append_operation_step_log(
                     "transfer",
-                    transfer_mode,
-                    exc.message,
-                    execution_date=serialize_value(execution_date_value),
+                    "started",
+                    {
+                        "source_account": source_account,
+                        "recipient_iban": recipient_iban,
+                        "recipient_bic_provided": bool(recipient_bic),
+                        "endtoend_id": endtoend_id,
+                        "instant_payment": instant_payment,
+                        "execution_date": serialize_value(execution_date_value),
+                    },
+                )
+                accounts = select_accounts(self._run("list_accounts", list_accounts, client), source_account)
+                if not accounts:
+                    raise FinTSValidationError("transfer", "source account not found", field="source_account")
+                if len(accounts) > 1:
+                    raise FinTSValidationError("transfer", "source account filter is ambiguous", field="source_account")
+
+                debit_account = accounts[0]
+                transfer_overview = TransferSummary(
+                    source_account_label=account_label(debit_account),
+                    recipient_name=recipient_name,
+                    recipient_iban=recipient_iban,
+                    recipient_bic=recipient_bic,
+                    amount=str(amount_decimal),
+                    currency="EUR",
+                    purpose=purpose,
+                    endtoend_id=endtoend_id,
                     instant_payment=instant_payment,
-                ) from exc
-            except TanRequiredError as exc:
-                setattr(exc, "transfer_overview", transfer_overview)
-                setattr(exc, "transfer_mode", transfer_mode)
-                raise
-            except VOPRequiredError as exc:
-                setattr(exc, "transfer_overview", transfer_overview)
-                setattr(exc, "transfer_mode", transfer_mode)
-                raise
-            except FinTSOperationError as exc:
-                if transfer_mode != "standard_transfer" and self._looks_like_transfer_capability_error(exc.message):
+                    execution_date=serialize_value(execution_date_value),
+                ).to_dict()
+                self._remember_pending_transfer(
+                    transfer_params,
+                    transfer_overview=transfer_overview,
+                )
+                transfer_mode = "scheduled_transfer" if execution_date_value is not None else "instant_payment" if instant_payment else "standard_transfer"
+                try:
+                    if execution_date_value is None:
+                        result = self._run(
+                            "transfer",
+                            client.simple_sepa_transfer,
+                            debit_account,
+                            recipient_iban,
+                            recipient_bic,
+                            recipient_name,
+                            amount_decimal,
+                            account_name,
+                            purpose,
+                            instant_payment,
+                            endtoend_id,
+                            capability_context=transfer_mode,
+                        )
+                    else:
+                        pain_message, pain_descriptor = self._build_sepa_transfer_pain_message(
+                            client=client,
+                            account_name=account_name,
+                            debit_account=debit_account,
+                            recipient_name=recipient_name,
+                            recipient_iban=recipient_iban,
+                            recipient_bic=recipient_bic,
+                            amount_decimal=amount_decimal,
+                            purpose=purpose,
+                            endtoend_id=endtoend_id,
+                            execution_date=execution_date_value,
+                        )
+                        result = self._run(
+                            "transfer",
+                            client.sepa_transfer,
+                            debit_account,
+                            pain_message,
+                            False,
+                            None,
+                            "EUR",
+                            False,
+                            pain_descriptor,
+                            instant_payment,
+                            capability_context=transfer_mode,
+                        )
+                except FinTSCapabilityError as exc:
+                    self._clear_pending_transfer()
                     raise FinTSCapabilityError(
                         "transfer",
                         transfer_mode,
@@ -934,35 +983,69 @@ class PyFinIntegrationClient:
                         execution_date=serialize_value(execution_date_value),
                         instant_payment=instant_payment,
                     ) from exc
-                raise
+                except TanRequiredError as exc:
+                    setattr(exc, "transfer_overview", transfer_overview)
+                    setattr(exc, "transfer_mode", transfer_mode)
+                    raise
+                except VOPRequiredError as exc:
+                    setattr(exc, "transfer_overview", transfer_overview)
+                    setattr(exc, "transfer_mode", transfer_mode)
+                    raise
+                except FinTSOperationError as exc:
+                    self._clear_pending_transfer()
+                    if transfer_mode != "standard_transfer" and self._looks_like_transfer_capability_error(exc.message):
+                        raise FinTSCapabilityError(
+                            "transfer",
+                            transfer_mode,
+                            exc.message,
+                            execution_date=serialize_value(execution_date_value),
+                            instant_payment=instant_payment,
+                        ) from exc
+                    raise
 
-            response = self.transfer_response_from_result(
-                result,
-                {
-                    "amount": amount_decimal,
-                    "source_account": serialize_value(getattr(debit_account, "iban", None)) or repr(debit_account),
-                    "recipient_name": recipient_name,
-                    "recipient_iban": recipient_iban,
-                    "recipient_bic": recipient_bic,
-                    "purpose": purpose,
-                    "endtoend_id": endtoend_id,
-                    "instant_payment": instant_payment,
-                    "execution_date": serialize_value(execution_date_value),
-                },
-                transfer_overview=transfer_overview,
-            )
-            append_operation_log(
-                "transfer",
-                {
-                    "source_account": response.source_account_label,
-                    "recipient_iban": response.recipient_iban,
-                    "status": response.status,
-                    "success": response.success,
-                    "instant_payment": instant_payment,
-                    "execution_date": serialize_value(execution_date_value),
-                },
-            )
-            return response
+                response = self.transfer_response_from_result(
+                    result,
+                    {
+                        "amount": amount_decimal,
+                        "source_account": serialize_value(getattr(debit_account, "iban", None)) or repr(debit_account),
+                        "recipient_name": recipient_name,
+                        "recipient_iban": recipient_iban,
+                        "recipient_bic": recipient_bic,
+                        "purpose": purpose,
+                        "endtoend_id": endtoend_id,
+                        "instant_payment": instant_payment,
+                        "execution_date": serialize_value(execution_date_value),
+                    },
+                    transfer_overview=transfer_overview,
+                )
+                if not response.success:
+                    first_bank_message = None
+                    for item in response.bank_responses:
+                        if item.get("message"):
+                            first_bank_message = str(item["message"])
+                            break
+                    raise FinTSOperationError(
+                        "transfer",
+                        augment_error_with_bank_response(first_bank_message or "bank rejected transfer"),
+                    )
+                self._clear_pending_transfer()
+                append_operation_log(
+                    "transfer",
+                    {
+                        "source_account": response.source_account_label,
+                        "recipient_iban": response.recipient_iban,
+                        "status": response.status,
+                        "success": response.success,
+                        "instant_payment": instant_payment,
+                        "execution_date": serialize_value(execution_date_value),
+                    },
+                )
+                return response
+        except (TanRequiredError, VOPRequiredError):
+            raise
+        except Exception:
+            self._clear_pending_transfer()
+            raise
 
     def _looks_like_transfer_capability_error(self, message: str) -> bool:
         haystack = message.lower()

@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any, Iterable, Optional, Union
 
 import dotenv
-from fints.client import FinTS3PinTanClient
+from fints.client import FinTS3PinTanClient, ING_BANK_IDENTIFIER, NeedTANResponse, NeedVOPResponse
 
 from .env_config import load_project_env
 
@@ -145,6 +145,8 @@ def apply_runtime_patches() -> None:
     if os.getenv("FINTS_DISABLE_BOOTSTRAP_PATCH") != "1":
         _patch_minimal_bootstrap()
 
+    _patch_ing_two_step_tan()
+    _patch_retry_detection()
     _patch_balance_conversions()
     _RUNTIME_PATCHES_APPLIED = True
 
@@ -226,6 +228,210 @@ def _patch_balance_conversions() -> None:
         fints_formals.Balance1.as_mt940_Balance = _safe_balance1
     if orig_b2:
         fints_formals.Balance2.as_mt940_Balance = _safe_balance2
+
+
+def _select_two_step_tan_mechanism(
+    client: Any,
+    *,
+    allowed_security_functions: Optional[Iterable[str]] = None,
+) -> Optional[str]:
+    methods = client.get_tan_mechanisms() or {}
+    allowed = {str(item) for item in (allowed_security_functions or [])}
+    for security_function, parameter in methods.items():
+        code = str(security_function)
+        if code == "999":
+            continue
+        if allowed and code not in allowed:
+            continue
+        if str(getattr(parameter, "tan_process", "")) != "2":
+            continue
+        try:
+            client.set_tan_mechanism(str(getattr(parameter, "security_function", code)))
+            return code
+        except NotImplementedError:
+            continue
+    return None
+
+
+def _apply_ing_two_step_tan_selection(client: Any, response: Any) -> bool:
+    if getattr(response, "code", None) != "3920":
+        return False
+    if getattr(client, "bank_identifier", None) != ING_BANK_IDENTIFIER:
+        return False
+
+    allowed_security_functions = list(getattr(response, "parameters", []) or [])
+    client.allowed_security_functions = allowed_security_functions
+    current = getattr(client, "get_current_tan_mechanism", lambda: None)()
+    if current is not None and str(current) in {str(item) for item in allowed_security_functions}:
+        return False
+
+    selected = _select_two_step_tan_mechanism(
+        client,
+        allowed_security_functions=allowed_security_functions,
+    )
+    if selected:
+        logger.warning(
+            "Enabled local ING two-step TAN patch and selected mechanism %s",
+            selected,
+        )
+        return True
+
+    logger.warning(
+        "ING patch found no supported two-step TAN mechanism in %s; keeping current mechanism",
+        allowed_security_functions,
+    )
+    return False
+
+
+def _patch_ing_two_step_tan() -> None:
+    original = FinTS3PinTanClient._process_response
+
+    def patched_process_response(self: FinTS3PinTanClient, dialog: Any, segment: Any, response: Any):
+        _apply_ing_two_step_tan_selection(self, response)
+        return original(self, dialog, segment, response)
+
+    FinTS3PinTanClient._process_response = patched_process_response
+
+
+def _retry_response_from_raw_response(
+    client: Any,
+    command_seg: Any,
+    response: Any,
+    resume_func: Any,
+    *,
+    vop_standard: str | None = None,
+) -> NeedTANResponse | NeedVOPResponse | None:
+    hivpp = None
+    if vop_standard:
+        try:
+            from fints.segments.auth import HIVPP1
+
+            hivpp = response.find_segment_first(HIVPP1)
+        except Exception:
+            hivpp = None
+        if hivpp is not None:
+            vop_result = getattr(hivpp, "vop_single_result", None)
+            vop_code = getattr(vop_result, "result", None)
+            if vop_code in {"RVNA", "RVNM", "RVMC"}:
+                logger.warning(
+                    "Detected VoP retry response in raw payment response fallback for segment %s",
+                    getattr(getattr(command_seg, "header", None), "type", None),
+                )
+                return NeedVOPResponse(
+                    vop_result=hivpp,
+                    command_seg=command_seg,
+                    resume_method=resume_func,
+                )
+
+    try:
+        hitan = response.find_segment_first("HITAN")
+    except Exception:
+        hitan = None
+
+    if hitan is None:
+        return None
+
+    logger.warning(
+        "Detected TAN challenge in raw response fallback for segment %s",
+        getattr(getattr(command_seg, "header", None), "type", None),
+    )
+    return NeedTANResponse(
+        command_seg,
+        hitan,
+        resume_func,
+        client.is_challenge_structured() if hasattr(client, "is_challenge_structured") else False,
+        False,
+        hivpp,
+    )
+
+
+def _patch_retry_detection() -> None:
+    def patched_send_with_possible_retry(self: FinTS3PinTanClient, dialog: Any, command_seg: Any, resume_func: Any):
+        with dialog:
+            if self._need_twostep_tan_for_segment(command_seg):
+                tan_seg = self._get_tan_segment(command_seg, "4")
+
+                response = dialog.send(command_seg, tan_seg)
+
+                for resp in response.responses(tan_seg):
+                    if resp.code in ("0030", "3955"):
+                        return NeedTANResponse(
+                            command_seg,
+                            response.find_segment_first("HITAN"),
+                            resume_func,
+                            self.is_challenge_structured(),
+                            resp.code == "3955",
+                        )
+                    if resp.code.startswith("9"):
+                        raise Exception(f"Error response: {response!r}")
+            else:
+                response = dialog.send(command_seg)
+                retry_response = _retry_response_from_raw_response(self, command_seg, response, resume_func)
+                if retry_response is not None:
+                    return retry_response
+
+            return resume_func(command_seg, response)
+
+    def patched_send_pay_with_possible_retry(self: FinTS3PinTanClient, dialog: Any, command_seg: Any, resume_func: Any):
+        vop_seg = []
+        vop_standard = self._find_vop_format_for_segment(command_seg)
+        if vop_standard:
+            from fints.segments.auth import HKVPP1, HIVPP1, PSRD1
+
+            vop_seg = [HKVPP1(supported_reports=PSRD1(psrd=[vop_standard]))]
+        else:
+            HIVPP1 = None
+
+        with dialog:
+            if self._need_twostep_tan_for_segment(command_seg):
+                tan_seg = self._get_tan_segment(command_seg, "4")
+                segments = vop_seg + [command_seg, tan_seg]
+
+                response = dialog.send(*segments)
+
+                if vop_standard:
+                    hivpp = response.find_segment_first(HIVPP1, throw=True)
+
+                    vop_result = hivpp.vop_single_result
+                    if vop_result.result in ("RVNA", "RVNM", "RVMC") or (
+                        vop_result.result == "RCVC" and "3945" in [res.code for res in response.responses(tan_seg)]
+                    ):
+                        return NeedVOPResponse(
+                            vop_result=hivpp,
+                            command_seg=command_seg,
+                            resume_method=resume_func,
+                        )
+                else:
+                    hivpp = None
+
+                for resp in response.responses(tan_seg):
+                    if resp.code in ("0030", "3955"):
+                        return NeedTANResponse(
+                            command_seg,
+                            response.find_segment_first("HITAN"),
+                            resume_func,
+                            self.is_challenge_structured(),
+                            resp.code == "3955",
+                            hivpp,
+                        )
+                    if resp.code.startswith("9"):
+                        raise Exception(f"Error response: {response!r}")
+            else:
+                response = dialog.send(command_seg)
+                retry_response = _retry_response_from_raw_response(
+                    self,
+                    command_seg,
+                    response,
+                    resume_func,
+                    vop_standard=vop_standard,
+                )
+                if retry_response is not None:
+                    return retry_response
+
+            return resume_func(command_seg, response)
+
+    FinTS3PinTanClient._send_with_possible_retry = patched_send_with_possible_retry
+    FinTS3PinTanClient._send_pay_with_possible_retry = patched_send_pay_with_possible_retry
 
 
 def create_client(cfg: dict[str, Any]) -> FinTS3PinTanClient:

@@ -8,10 +8,6 @@ __pycache__
 logs
 .env
 .env copy
-README.md
 TODO.md
-test_accounts_api_tan.py
-test_balance_api_tan.py
-test_transactions_api_tan.py
-test_single_account_api_tan.py
-api_tan_test_helper.py
+examples
+tests

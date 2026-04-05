@@ -37,12 +37,7 @@ jobs:
         run: |
           python -m compileall \
             fints_rest_wrapper \
-            api_tan_test_helper.py \
-            test_accounts_api_tan.py \
-            test_balance_api_tan.py \
-            test_transactions_api_tan.py \
-            test_single_account_api_tan.py \
-            test_transfer_api_tan.py
+            examples
 
       - name: Run simulated backend tests
         run: pytest tests -q

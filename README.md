@@ -1,6 +1,6 @@
 # python-fints REST Wrapper
 
-Small FastAPI wrapper around `python-fints`.
+Python library with an optional FastAPI wrapper around `python-fints`.
 
 PyPI package:
 
@@ -12,10 +12,14 @@ It currently supports:
 - balances
 - transactions
 - SEPA transfers
-- TAN / decoupled confirmation over HTTP
+- TAN / decoupled confirmation flows
 - payee verification (`VoP`) continuation
 
-The ASGI entrypoint is [`fints_rest_wrapper/fastapi_app.py`](fints_rest_wrapper/fastapi_app.py).
+The package can be used in three ways:
+
+- as a Python library
+- as a FastAPI-based REST server
+- as a Dockerized REST server
 
 ## Quick Start
 
@@ -30,21 +34,6 @@ Install from PyPI:
 ```bash
 pip install fints-rest-wrapper
 ```
-
-Start the API server after installation:
-
-```bash
-fints-rest-server start
-fints-rest-server status
-fints-rest-server stop
-```
-
-Configuration priority for the CLI:
-
-- explicit CLI flags like `--host` or `--port`
-- values loaded from `--env-file`
-- process environment variables
-- built-in defaults
 
 For local development:
 
@@ -67,11 +56,52 @@ A FinTS product ID can be requested via the official registration page:
 
 - `https://www.fints.org/de/hersteller/produktregistrierung`
 
-Start the API:
+## Usage Modes
+
+- `Library`: import `FinTS` directly in your Python application
+- `REST server`: run the built-in FastAPI service locally
+- `Docker`: run the REST server through `Dockerfile` or `docker-compose.yml`
+
+## Library
+
+Use the package directly in Python:
+
+```python
+from fints_rest_wrapper import (
+    FinTS,
+    TanRequiredError,
+)
+
+with FinTS(
+    product_id="YourProductID",
+    bank="12345678",
+    user="your-user",
+    pin="your-pin",
+    server="https://bank.example/fints",
+) as fints:
+    try:
+        accounts = fints.accounts()
+        transactions = fints.transactions(days=30)
+    except TanRequiredError as exc:
+        print(exc.challenge.message)
+```
+
+## REST Server
+
+Run the optional local HTTP server with the bundled CLI:
 
 ```bash
-uvicorn fints_rest_wrapper.fastapi_app:app --reload --host 0.0.0.0 --port 8000
+fints-rest-server start
+fints-rest-server status
+fints-rest-server stop
 ```
+
+Configuration priority for the CLI:
+
+- explicit CLI flags like `--host` or `--port`
+- values loaded from `--env-file`
+- process environment variables
+- built-in defaults
 
 Installed CLI defaults:
 
@@ -93,7 +123,33 @@ OpenAPI:
 - `http://127.0.0.1:8000/docs`
 - `http://127.0.0.1:8000/openapi.json`
 
-## Main Endpoints
+## Docker
+
+The repository includes both [`Dockerfile`](Dockerfile) and [`docker-compose.yml`](docker-compose.yml).
+
+Start the REST server with Docker Compose:
+
+```bash
+docker compose up --build -d
+docker compose logs -f api
+docker compose down
+```
+
+Current Docker defaults:
+
+- container port: `9686`
+- published port: `9686`
+- env file: `.env`
+- log volume: `./logs:/app/logs`
+
+Docker OpenAPI:
+
+- `http://127.0.0.1:9686/docs`
+- `http://127.0.0.1:9686/openapi.json`
+
+## REST API
+
+Optional HTTP endpoints:
 
 - `GET /health`
 - `POST /accounts`
@@ -174,16 +230,29 @@ Sessions are:
 
 The TTL defaults to `300` seconds and can be changed with `FINTS_SESSION_TTL_SECONDS`.
 
-## Manual Test Helpers
+## Examples
 
 The repository includes small scripts for manual API testing:
 
-- [`test_accounts_api_tan.py`](test_accounts_api_tan.py)
-- [`test_balance_api_tan.py`](test_balance_api_tan.py)
-- [`test_transactions_api_tan.py`](test_transactions_api_tan.py)
-- [`test_transfer_api_tan.py`](test_transfer_api_tan.py)
+Library examples:
 
-They use [`api_tan_test_helper.py`](api_tan_test_helper.py) and read credentials from `.env`.
+- [`examples/accounts_lib.py`](examples/accounts_lib.py)
+- [`examples/balance_lib.py`](examples/balance_lib.py)
+- [`examples/transactions_lib.py`](examples/transactions_lib.py)
+- [`examples/single_account_lib.py`](examples/single_account_lib.py)
+- [`examples/transfer_lib.py`](examples/transfer_lib.py)
+
+They use [`examples/lib_helper.py`](examples/lib_helper.py) and talk directly to `FinTS`.
+
+REST API examples:
+
+- [`examples/accounts_api_tan.py`](examples/accounts_api_tan.py)
+- [`examples/balance_api_tan.py`](examples/balance_api_tan.py)
+- [`examples/transactions_api_tan.py`](examples/transactions_api_tan.py)
+- [`examples/single_account_api_tan.py`](examples/single_account_api_tan.py)
+- [`examples/transfer_api_tan.py`](examples/transfer_api_tan.py)
+
+They use [`examples/api_tan_helper.py`](examples/api_tan_helper.py) and read credentials from `.env`.
 
 Optional helper-script env vars for manual transfer runs only:
 
@@ -192,7 +261,7 @@ Optional helper-script env vars for manual transfer runs only:
 
 ## Documentation
 
-Detailed API reference:
+Detailed REST API reference:
 
 - [`docs/API.md`](docs/API.md)
 
@@ -217,7 +286,7 @@ Important files:
 Basic checks:
 
 ```bash
-python -m compileall fints_rest_wrapper api_tan_test_helper.py test_accounts_api_tan.py test_balance_api_tan.py test_transactions_api_tan.py test_single_account_api_tan.py test_transfer_api_tan.py
+python -m compileall fints_rest_wrapper examples
 .venv/bin/python -m pytest tests -q
 ```
 

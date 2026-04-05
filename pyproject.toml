@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "fints-rest-wrapper"
-version = "1.0.5"
-description = "Small FastAPI wrapper around python-fints"
+version = "1.1.0"
+description = "Python library and FastAPI wrapper around python-fints"
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"

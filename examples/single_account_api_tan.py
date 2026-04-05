@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import sys
 
-from api_tan_test_helper import (
+from api_tan_helper import (
     build_config_payload,
     confirm_flow,
     load_dotenv_file,

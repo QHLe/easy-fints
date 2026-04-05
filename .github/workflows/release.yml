@@ -31,13 +31,8 @@ jobs:
       - name: Compile Python sources
         run: |
           python -m compileall \
-            src \
-            api_tan_test_helper.py \
-            test_accounts_api_tan.py \
-            test_balance_api_tan.py \
-            test_transactions_api_tan.py \
-            test_single_account_api_tan.py \
-            test_transfer_api_tan.py
+            fints_rest_wrapper \
+            examples
 
       - name: Run simulated backend tests
         run: pytest tests -q
@@ -78,10 +73,10 @@ jobs:
           generate_release_notes: true
           body: |
             Highlights:
-            - account, balance, transaction, and transfer API endpoints
+            - direct Python library usage via FinTS and FinTSClient
+            - account, balance, transaction, and transfer flows for library and REST usage
             - TAN, decoupled confirmation, and VoP continuation flow
-            - session inspection and cancellation endpoints
-            - simulated backend test suite and hardened logging
+            - examples, Docker packaging, and simulated backend test coverage
 
             Note:
             - active confirmation sessions are in-memory and process-local

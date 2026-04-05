@@ -14,7 +14,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
 
 from .client import (
-    PyFinIntegrationClient,
+    FinTSClient,
     looks_like_transfer_result,
 )
 from .diagnostics import summarize_last_bank_response
@@ -50,7 +50,7 @@ app = FastAPI()
 # In-memory operation sessions.
 SESSIONS: dict[str, dict[str, Any]] = {}
 DEFAULT_SESSION_TTL_SECONDS = 300
-OperationHandler = Callable[[PyFinIntegrationClient, dict[str, Any]], Any]
+OperationHandler = Callable[[FinTSClient, dict[str, Any]], Any]
 SESSION_STATE_RUNNING = "running"
 SESSION_STATE_AWAITING_TAN = "awaiting_tan"
 SESSION_STATE_AWAITING_DECOUPLED = "awaiting_decoupled"
@@ -255,7 +255,7 @@ def _close_session(session_id: str) -> None:
             pass
 
 
-def _create_session(client: PyFinIntegrationClient, operation: str, params: dict[str, Any]) -> str:
+def _create_session(client: FinTSClient, operation: str, params: dict[str, Any]) -> str:
     sid = str(uuid.uuid4())
     created_at = datetime.utcnow()
     SESSIONS[sid] = {
@@ -400,11 +400,11 @@ def _handle_client_operation(
     handler: OperationHandler,
 ):
     _prune_sessions()
-    client: PyFinIntegrationClient | None = None
+    client: FinTSClient | None = None
     cfg = _api_config_from_payload(payload)
 
     try:
-        client = PyFinIntegrationClient.from_env(overrides=cfg)
+        client = FinTSClient.from_env(overrides=cfg)
         result = handler(client, params)
         return _serialize_result(result)
     except TanRequiredError as exc:
@@ -482,18 +482,18 @@ def _handle_client_operation(
         )
 
 
-def _accounts_handler(client: PyFinIntegrationClient, params: dict[str, Any]):
+def _accounts_handler(client: FinTSClient, params: dict[str, Any]):
     return client.begin_accounts()
 
 
-def _balance_handler(client: PyFinIntegrationClient, params: dict[str, Any]):
+def _balance_handler(client: FinTSClient, params: dict[str, Any]):
     return client.get_account_overview(
         account_filter=params.get("account_filter"),
         include_transaction_count_days=params.get("include_transaction_count_days"),
     )
 
 
-def _transactions_handler(client: PyFinIntegrationClient, params: dict[str, Any]):
+def _transactions_handler(client: FinTSClient, params: dict[str, Any]):
     return client.list_transactions_by_account(
         account_filter=params.get("account_filter"),
         days=params["days"],
@@ -502,7 +502,7 @@ def _transactions_handler(client: PyFinIntegrationClient, params: dict[str, Any]
     )
 
 
-def _transfer_handler(client: PyFinIntegrationClient, params: dict[str, Any]):
+def _transfer_handler(client: FinTSClient, params: dict[str, Any]):
     return client.initiate_transfer(
         source_account=params["source_account"],
         account_name=params["account_name"],
@@ -625,7 +625,7 @@ def _retry_transfer_with_name_local(payload: dict[str, Any]):
             operation="transfer",
         )
 
-    old_client: PyFinIntegrationClient = session.get("client")
+    old_client: FinTSClient = session.get("client")
     params = dict(session.get("params") or {})
     params["recipient_name"] = recipient_name
     transfer_overview = _transfer_overview_from_params(params)
@@ -852,7 +852,7 @@ def _confirm_local(payload: dict[str, Any]):
         )
         return JSONResponse(status_code=404, content={"error": "not_found", "message": "session not found or expired"})
 
-    client: PyFinIntegrationClient = session.get("client")
+    client: FinTSClient = session.get("client")
     operation = session.get("operation")
     params = session.get("params") or {}
     session_state = session.get("state")
