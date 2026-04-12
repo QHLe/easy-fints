@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import sys
 
-from fints_rest_wrapper import TanRequiredError
+from easy_fints import TanRequiredError
 
 from lib_helper import build_fints, confirm_with_fints, load_dotenv_file, print_data
 

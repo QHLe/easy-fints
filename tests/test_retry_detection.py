@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fints.client import NeedTANResponse
 
-from fints_rest_wrapper.helpers import _retry_response_from_raw_response
+from easy_fints.helpers import _retry_response_from_raw_response
 
 
 class _FakeClient:

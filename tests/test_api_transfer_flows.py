@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import datetime as dt
 
-from fints_rest_wrapper import fastapi_app
+from easy_fints import fastapi_app
 from tests.support.fake_fints_backend import CREATED_CLIENTS, make_transfer_payload, unwrap_response
 
 

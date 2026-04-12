@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import datetime as dt
 
-from fints_rest_wrapper import FinTS
-from fints_rest_wrapper.models import FinTSConfig
+from easy_fints import FinTS
+from easy_fints.models import FinTSConfig
 
 
 class DummyClient:
@@ -43,7 +43,7 @@ def test_service_builds_shared_client_with_product_id(monkeypatch):
         created.append(client)
         return client
 
-    monkeypatch.setattr("fints_rest_wrapper.service.FinTSClient", fake_client)
+    monkeypatch.setattr("easy_fints.service.FinTSClient", fake_client)
 
     service = FinTS(
         product_id="demo-product",
@@ -81,7 +81,7 @@ def test_service_close_delegates_to_shared_client(monkeypatch):
         created.append(client)
         return client
 
-    monkeypatch.setattr("fints_rest_wrapper.service.FinTSClient", fake_client)
+    monkeypatch.setattr("easy_fints.service.FinTSClient", fake_client)
 
     service = FinTS(
         product_id="demo-product",

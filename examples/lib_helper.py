@@ -7,7 +7,7 @@ from typing import Any, Callable
 
 from api_tan_helper import load_dotenv_file, print_json, require_env, save_challenge_image
 
-from fints_rest_wrapper import FinTS, TanRequiredError, VOPRequiredError
+from easy_fints import FinTS, TanRequiredError, VOPRequiredError
 
 
 def _as_bool(value: Any) -> bool:

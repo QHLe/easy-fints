@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 from fints.client import ING_BANK_IDENTIFIER
 
-from fints_rest_wrapper.helpers import _apply_ing_two_step_tan_selection
+from easy_fints.helpers import _apply_ing_two_step_tan_selection
 
 
 class _FakeClient:

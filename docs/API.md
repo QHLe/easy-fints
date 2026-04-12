@@ -1,11 +1,11 @@
 # API Reference
 
-This API is served by the ASGI app `fints_rest_wrapper.fastapi_app:app`.
+This API is served by the ASGI app `easy_fints.fastapi_app:app`.
 
 Run locally with:
 
 ```bash
-uvicorn fints_rest_wrapper.fastapi_app:app --reload
+uvicorn easy_fints.fastapi_app:app --reload
 ```
 
 Base URL:

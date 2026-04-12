@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 from urllib import error, request
 
-from fints_rest_wrapper.env_config import resolve_env_file
+from easy_fints.env_config import resolve_env_file
 
 
 ROOT = Path(__file__).resolve().parent

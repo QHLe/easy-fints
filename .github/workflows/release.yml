@@ -31,7 +31,7 @@ jobs:
       - name: Compile Python sources
         run: |
           python -m compileall \
-            fints_rest_wrapper \
+            easy_fints \
             examples
 
       - name: Run simulated backend tests
@@ -55,7 +55,7 @@ jobs:
           context: .
           file: ./Dockerfile
           push: false
-          tags: python-fints-rest-wrapper:${{ github.ref_name }}
+          tags: easy-fints:${{ github.ref_name }}
 
   github-release:
     name: Create GitHub Release

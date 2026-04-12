@@ -3,8 +3,8 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "fints-rest-wrapper"
-version = "1.1.0"
+name = "easy-fints"
+version = "1.2.0"
 description = "Python library and FastAPI wrapper around python-fints"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -25,6 +25,7 @@ dependencies = [
   "uvicorn[standard]",
   "fints",
   "Markdown",
+  "python-dotenv",
 ]
 
 [project.optional-dependencies]
@@ -32,17 +33,16 @@ dev = [
   "build",
   "pytest",
 ]
-
 [project.scripts]
-fints-rest-server = "fints_rest_wrapper.cli:main"
+fints-rest-server = "easy_fints.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/QHLe/Python-Fints-REST-wrapper"
-Repository = "https://github.com/QHLe/Python-Fints-REST-wrapper"
-Issues = "https://github.com/QHLe/Python-Fints-REST-wrapper/issues"
+Homepage = "https://github.com/QHLe/easy-fints"
+Repository = "https://github.com/QHLe/easy-fints"
+Issues = "https://github.com/QHLe/easy-fints/issues"
 
 [tool.setuptools]
 include-package-data = true
 
 [tool.setuptools.packages.find]
-include = ["fints_rest_wrapper*"]
+include = ["easy_fints*"]

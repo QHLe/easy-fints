@@ -8,7 +8,7 @@ WORKDIR /app
 COPY requirements.txt /app/requirements.txt
 COPY pyproject.toml /app/pyproject.toml
 COPY README.md /app/README.md
-COPY fints_rest_wrapper /app/fints_rest_wrapper
+COPY easy_fints /app/easy_fints
 
 RUN pip install --no-cache-dir --upgrade pip \
     && pip install --no-cache-dir .
@@ -19,4 +19,4 @@ RUN mkdir -p /app/logs
 
 EXPOSE 9686
 
-CMD ["uvicorn", "fints_rest_wrapper.fastapi_app:app", "--host", "0.0.0.0", "--port", "9686"]
+CMD ["uvicorn", "easy_fints.fastapi_app:app", "--host", "0.0.0.0", "--port", "9686"]

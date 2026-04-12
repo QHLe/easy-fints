@@ -36,7 +36,7 @@ jobs:
       - name: Compile Python sources
         run: |
           python -m compileall \
-            fints_rest_wrapper \
+            easy_fints \
             examples
 
       - name: Run simulated backend tests

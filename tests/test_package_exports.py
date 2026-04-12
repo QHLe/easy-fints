@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fints_rest_wrapper import (
+from easy_fints import (
     FinTSClient,
     FinTSConfig,
     FinTSOperationError,

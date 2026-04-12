@@ -82,7 +82,7 @@ def _start_server(args: argparse.Namespace) -> int:
         sys.executable,
         "-m",
         "uvicorn",
-        "fints_rest_wrapper.fastapi_app:app",
+        "easy_fints.fastapi_app:app",
         "--host",
         host,
         "--port",

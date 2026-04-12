@@ -1,10 +1,14 @@
-# python-fints REST Wrapper
+# easy-fints
 
 Python library with an optional FastAPI wrapper around `python-fints`.
 
 PyPI package:
 
-- `fints-rest-wrapper`
+- `easy-fints`
+
+Python import package:
+
+- `easy_fints`
 
 It currently supports:
 
@@ -32,7 +36,7 @@ Requirements:
 Install from PyPI:
 
 ```bash
-pip install fints-rest-wrapper
+pip install easy-fints
 ```
 
 For local development:
@@ -67,7 +71,7 @@ A FinTS product ID can be requested via the official registration page:
 Use the package directly in Python:
 
 ```python
-from fints_rest_wrapper import (
+from easy_fints import (
     FinTS,
     TanRequiredError,
 )
@@ -114,7 +118,7 @@ CLI examples:
 
 ```bash
 fints-rest-server start --host 127.0.0.1 --port 9686
-fints-rest-server start --env-file /etc/fints-rest-wrapper.env
+fints-rest-server start --env-file /etc/easy-fints.env
 fints-rest-server stop
 ```
 
@@ -278,15 +282,15 @@ High-level testing/verification notes:
 
 Important files:
 
-- [`fints_rest_wrapper/fastapi_app.py`](fints_rest_wrapper/fastapi_app.py)
-- [`fints_rest_wrapper/client.py`](fints_rest_wrapper/client.py)
-- [`fints_rest_wrapper/helpers.py`](fints_rest_wrapper/helpers.py)
-- [`fints_rest_wrapper/models.py`](fints_rest_wrapper/models.py)
+- [`easy_fints/fastapi_app.py`](easy_fints/fastapi_app.py)
+- [`easy_fints/client.py`](easy_fints/client.py)
+- [`easy_fints/helpers.py`](easy_fints/helpers.py)
+- [`easy_fints/models.py`](easy_fints/models.py)
 
 Basic checks:
 
 ```bash
-python -m compileall fints_rest_wrapper examples
+python -m compileall easy_fints examples
 .venv/bin/python -m pytest tests -q
 ```
 
@@ -305,16 +309,16 @@ GitHub Actions:
 
 Package name on PyPI:
 
-- `fints-rest-wrapper`
+- `easy-fints`
 
 Import package in Python:
 
-- `fints_rest_wrapper`
+- `easy_fints`
 
 Install from PyPI after the first published release:
 
 ```bash
-pip install fints-rest-wrapper
+pip install easy-fints
 ```
 
 ## Deployment Notes

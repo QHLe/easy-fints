@@ -5,7 +5,7 @@ import os
 import pytest
 from dotenv import load_dotenv
 
-from fints_rest_wrapper import cli
+from easy_fints import cli
 
 
 def test_status_returns_not_running_when_pid_file_missing(tmp_path, capsys):
@@ -99,7 +99,7 @@ def test_start_uses_env_file_values(monkeypatch, tmp_path):
         os.sys.executable,
         "-m",
         "uvicorn",
-        "fints_rest_wrapper.fastapi_app:app",
+        "easy_fints.fastapi_app:app",
         "--host",
         "127.0.0.1",
         "--port",

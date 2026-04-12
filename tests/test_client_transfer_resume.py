@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from fints_rest_wrapper.client import FinTSClient
-from fints_rest_wrapper.models import FinTSConfig, TransferResponse
+from easy_fints.client import FinTSClient
+from easy_fints.models import FinTSConfig, TransferResponse
 
 
 def _build_client() -> FinTSClient:
