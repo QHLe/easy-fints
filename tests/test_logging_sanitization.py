@@ -16,6 +16,7 @@ def test_append_operation_step_log_sanitizes_sensitive_fields(tmp_path, monkeypa
             "source_account": "DE11111111111111111111",
             "recipient_iban": "DE44670800500660521700",
             "recipient_name": "Alice Example",
+            "owner_name": "Alice Example",
             "endtoend_id": "INV-2026-0001",
             "close_match_name": "Alice Example",
             "other_identification": "Customer 123",
@@ -37,6 +38,7 @@ def test_append_operation_step_log_sanitizes_sensitive_fields(tmp_path, monkeypa
     assert record["tan"] == "[redacted]"
     assert record["image_base64"] == "[redacted]"
     assert record["recipient_name"] == "[masked]"
+    assert record["owner_name"] == "[masked]"
     assert record["close_match_name"] == "[masked]"
     assert record["other_identification"] == "[masked]"
     assert record["source_account"].startswith("DE11")

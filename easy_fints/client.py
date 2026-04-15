@@ -9,6 +9,7 @@ from typing import Any, Iterator, Optional
 
 import fints.exceptions as fints_exceptions
 from fints.client import NeedTANResponse, NeedVOPResponse
+from fints.formals import CUSTOMER_ID_ANONYMOUS
 from sepaxml import SepaTransfer
 
 logger = logging.getLogger("pyfin_client")
@@ -27,8 +28,10 @@ from .helpers import (
     first_unsupported_sepa_char,
     get_balance,
     is_valid_iban,
+    list_account_information,
     list_accounts,
     load_config,
+    match_account_information,
     normalize_transaction,
     promote_two_step_tan,
     select_accounts,
@@ -47,6 +50,7 @@ from .exceptions import (
 from .models import (
     AccountSummary,
     AccountTransactions,
+    BankInfo,
     FinTSConfig,
     StoredBankInfo,
     StoredSepaProfile,
@@ -122,6 +126,109 @@ def coerce_optional_date(value: Any, *, field: str, operation: str) -> Optional[
         except ValueError as exc:
             raise FinTSValidationError(operation, f"invalid {field}: expected YYYY-MM-DD", field=field) from exc
     raise FinTSValidationError(operation, f"invalid {field}: expected YYYY-MM-DD", field=field)
+
+
+def _supported_operations_to_dict(value: Any) -> dict[str, bool]:
+    result: dict[str, bool] = {}
+    for key, enabled in (value or {}).items() if hasattr(value, "items") else []:
+        name = str(getattr(key, "name", None) or key)
+        result[name] = bool(enabled)
+    return result
+
+
+def _supported_formats_to_dict(value: Any) -> dict[str, list[str]]:
+    result: dict[str, list[str]] = {}
+    for key, formats in (value or {}).items() if hasattr(value, "items") else []:
+        name = str(getattr(key, "name", None) or key)
+        result[name] = [str(item) for item in (formats or [])]
+    return result
+
+
+def _tan_methods_snapshot_from_low_level_client(client: Any) -> TanMethodsSnapshot:
+    raw_methods = getattr(client, "get_tan_mechanisms", lambda: {})() or {}
+    current = getattr(client, "get_current_tan_mechanism", lambda: None)()
+    current_name = None
+    methods = []
+    for code, method in raw_methods.items() if hasattr(raw_methods, "items") else []:
+        method_name = serialize_value(getattr(method, "name", None))
+        methods.append(
+            TanMethod(
+                code=str(code),
+                name=method_name,
+                security_function=serialize_value(getattr(method, "security_function", None)),
+                identifier=serialize_value(getattr(method, "identifier", None)),
+            )
+        )
+        if str(code) == str(current):
+            current_name = method_name
+
+    # The anonymous bootstrap path in python-fints seeds "999" before any real
+    # method metadata is available. Avoid surfacing that placeholder as if it
+    # were a bank-advertised current TAN mechanism.
+    if not methods or str(current) not in {method.code for method in methods}:
+        current = None
+        current_name = None
+
+    return TanMethodsSnapshot(
+        current=serialize_value(current),
+        current_name=current_name,
+        methods=methods,
+        media=None,
+    )
+
+
+def lookup_bank_info(
+    *,
+    bank: str,
+    server: str,
+    product_id: str,
+    product_name: Optional[str] = None,
+    product_version: Optional[str] = None,
+) -> BankInfo:
+    client = create_client(
+        {
+            "bank": bank,
+            "user": CUSTOMER_ID_ANONYMOUS,
+            "pin": None,
+            "server": server,
+            "product_id": product_id,
+            "product_name": product_name,
+            "product_version": product_version,
+        }
+    )
+
+    try:
+        with client:
+            pass
+
+        try:
+            client.fetch_tan_mechanisms()
+        except Exception as exc:
+            logger.info("Anonymous TAN mechanism fetch for bank info failed: %s", exc)
+
+        info = client.get_information() or {}
+        bank_section = info.get("bank") if isinstance(info, dict) else {}
+        return BankInfo(
+            bank_code=str(bank),
+            server=str(server),
+            bank_name=serialize_value((bank_section or {}).get("name")),
+            supported_operations=_supported_operations_to_dict((bank_section or {}).get("supported_operations")),
+            supported_formats=_supported_formats_to_dict((bank_section or {}).get("supported_formats")),
+            supported_sepa_formats=[str(item) for item in ((bank_section or {}).get("supported_sepa_formats") or [])],
+            tan_methods=_tan_methods_snapshot_from_low_level_client(client),
+        )
+    except Exception as exc:
+        logger.exception("Exception while fetching anonymous bank info")
+        if getattr(fints_exceptions, "FinTSDialogInitError", None) and isinstance(
+            exc, fints_exceptions.FinTSDialogInitError
+        ):
+            raise FinTSOperationError(
+                "bank_info",
+                augment_error_with_bank_response(
+                    f"Dialog initialization failed: {exc}"
+                ),
+            ) from exc
+        raise FinTSOperationError("bank_info", augment_error_with_bank_response(str(exc))) from exc
 
 
 class FinTSClient:
@@ -344,7 +451,8 @@ class FinTSClient:
             {"filter_applied": bool(account_filter)},
         )
         accounts = select_accounts(self._run("list_accounts", list_accounts, client), account_filter)
-        summaries = [AccountSummary.from_account(account) for account in accounts]
+        account_information = self._run("list_account_information", list_account_information, client)
+        summaries = [self._account_summary(account, account_information) for account in accounts]
         append_operation_log(
             "accounts",
             {
@@ -358,7 +466,8 @@ class FinTSClient:
         if not self._has_standing_dialog():
             raise FinTSOperationError("resume_accounts", "FinTS dialog is no longer open")
         accounts = select_accounts(self._run("list_accounts", list_accounts, self._client), account_filter)
-        return [AccountSummary.from_account(account) for account in accounts]
+        account_information = self._run("list_account_information", list_account_information, self._client)
+        return [self._account_summary(account, account_information) for account in accounts]
 
     class _ClientScope:
         def __init__(self, owner: "FinTSClient"):
@@ -794,10 +903,26 @@ class FinTSClient:
         ) or []
         return [normalize_transaction(transaction) for transaction in raw_transactions]
 
+    def _account_summary(
+        self,
+        account: Any,
+        account_information: list[dict[str, Any]],
+        *,
+        balance: Any = None,
+        transaction_count: Optional[int] = None,
+    ) -> AccountSummary:
+        return AccountSummary.from_account(
+            account,
+            account_info=match_account_information(account, account_information),
+            balance=balance,
+            transaction_count=transaction_count,
+        )
+
     def list_accounts(self, account_filter: Optional[str] = None) -> list[AccountSummary]:
         with self._client_scope() as client:
             accounts = select_accounts(self._run("list_accounts", list_accounts, client), account_filter)
-            summaries = [AccountSummary.from_account(account) for account in accounts]
+            account_information = self._run("list_account_information", list_account_information, client)
+            summaries = [self._account_summary(account, account_information) for account in accounts]
             return summaries
 
     def initiate_transfer(
@@ -1080,9 +1205,10 @@ class FinTSClient:
                 },
             )
             accounts = select_accounts(self._run("list_accounts", list_accounts, client), account_filter)
+            account_information = self._run("list_account_information", list_account_information, client)
             overview = []
             for index, account in enumerate(accounts, start=1):
-                account_summary = AccountSummary.from_account(account)
+                account_summary = self._account_summary(account, account_information)
                 append_operation_step_log(
                     "balance",
                     "account_started",
@@ -1095,8 +1221,9 @@ class FinTSClient:
                 if include_transaction_count_days is not None:
                     rows = self._get_transactions_rows(client, account, include_transaction_count_days)
                     transaction_count = len(rows)
-                result_item = AccountSummary.from_account(
+                result_item = self._account_summary(
                     account,
+                    account_information,
                     balance=balance,
                     transaction_count=transaction_count,
                 )
@@ -1158,9 +1285,10 @@ class FinTSClient:
                 },
             )
             accounts = select_accounts(self._run("list_accounts", list_accounts, client), account_filter)
+            account_information = self._run("list_account_information", list_account_information, client)
             bundles = []
             for index, account in enumerate(accounts, start=1):
-                label = AccountSummary.from_account(account)
+                label = self._account_summary(account, account_information)
                 append_operation_step_log(
                     "transactions",
                     "account_started",
@@ -1180,8 +1308,9 @@ class FinTSClient:
                     for index, row in enumerate(rows, start=1)
                 ]
                 bundle = AccountTransactions(
-                    account=AccountSummary.from_account(
+                    account=self._account_summary(
                         account,
+                        account_information,
                         transaction_count=len(transactions),
                     ),
                     transactions=transactions,

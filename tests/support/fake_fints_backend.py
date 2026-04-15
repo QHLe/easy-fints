@@ -88,6 +88,7 @@ class FakeFinTSClient:
                 bank_code="12345678",
                 account_number="00000001",
                 subaccount_number=None,
+                owner_name=None,
                 bank_identifier="12345678",
             )
         ]
@@ -121,6 +122,7 @@ class FakeFinTSClient:
             bank_code="12345678",
             account_number="00000001",
             subaccount_number=None,
+            owner_name=None,
             bank_identifier="12345678",
         )
         return [

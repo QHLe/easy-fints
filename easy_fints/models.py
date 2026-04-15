@@ -9,7 +9,7 @@ from typing import Any, Optional
 
 from pydantic import BaseModel
 
-from .helpers import account_label, load_config
+from .helpers import account_label, load_config, translate_account_type
 
 
 def serialize_value(value: Any) -> Any:
@@ -76,7 +76,12 @@ class AccountSummary:
     bank_code: Optional[str]
     account_number: Optional[str]
     subaccount_number: Optional[str]
+    owner_name: Optional[str]
     bank_identifier: Optional[str]
+    product_name: Optional[str] = None
+    account_type: Optional[str] = None
+    account_type_code: Optional[str] = None
+    currency: Optional[str] = None
     balance: Optional[str] = None
     transaction_count: Optional[int] = None
     raw_repr: Optional[str] = None
@@ -86,17 +91,67 @@ class AccountSummary:
         cls,
         account: Any,
         *,
+        account_info: Optional[dict[str, Any]] = None,
         balance: Any = None,
         transaction_count: Optional[int] = None,
     ) -> "AccountSummary":
+        account_info = account_info or {}
+        owner_name_value = account_info.get("owner_name")
+        product_name_value = account_info.get("product_name")
+        account_type_value = account_info.get("type")
+        currency_value = account_info.get("currency")
+        normalized_product_name = (
+            str(product_name_value).strip() or None
+            if product_name_value is not None
+            else None
+        )
+        normalized_account_type = (
+            str(account_type_value).strip() or None
+            if account_type_value is not None
+            else None
+        )
+        normalized_currency = (
+            str(currency_value).strip() or None
+            if currency_value is not None
+            else None
+        )
+        if isinstance(owner_name_value, str):
+            owner_parts = [owner_name_value.strip()] if owner_name_value.strip() else []
+        else:
+            owner_parts = [str(value).strip() for value in (owner_name_value or []) if str(value).strip()]
+        account_bank_identifier = account_info.get("bank_identifier")
         return cls(
-            label=account_label(account),
-            iban=getattr(account, "iban", None),
+            label=account_label(account, product_name=normalized_product_name),
+            iban=getattr(account, "iban", None) or account_info.get("iban"),
             bic=getattr(account, "bic", None),
-            bank_code=getattr(account, "blz", None) or getattr(account, "bank_code", None),
-            account_number=getattr(account, "accountnumber", None) or getattr(account, "account", None),
-            subaccount_number=getattr(account, "subaccount", None),
-            bank_identifier=getattr(account, "bank_identifier", None) or getattr(account, "blz", None),
+            bank_code=(
+                getattr(account, "blz", None)
+                or getattr(account, "bank_code", None)
+                or getattr(account_bank_identifier, "bank_code", None)
+                or account_info.get("bank_code")
+            ),
+            account_number=(
+                getattr(account, "accountnumber", None)
+                or getattr(account, "account_number", None)
+                or getattr(account, "account", None)
+                or account_info.get("account_number")
+            ),
+            subaccount_number=(
+                getattr(account, "subaccount", None)
+                or getattr(account, "subaccount_number", None)
+                or account_info.get("subaccount_number")
+            ),
+            owner_name=" ".join(owner_parts) or None,
+            bank_identifier=(
+                getattr(account, "bank_identifier", None)
+                or getattr(account, "blz", None)
+                or getattr(account_bank_identifier, "bank_code", None)
+                or account_info.get("bank_code")
+            ),
+            product_name=normalized_product_name,
+            account_type=translate_account_type(normalized_account_type),
+            account_type_code=normalized_account_type,
+            currency=normalized_currency,
             balance=serialize_value(balance),
             transaction_count=transaction_count,
             raw_repr=repr(account),
@@ -253,6 +308,28 @@ class TanMethodsSnapshot:
             "current_name": self.current_name,
             "methods": [method.to_dict() for method in self.methods],
             "media": self.media,
+        }
+
+
+@dataclass(slots=True)
+class BankInfo:
+    bank_code: str
+    server: str
+    bank_name: Optional[str]
+    supported_operations: dict[str, bool]
+    supported_formats: dict[str, list[str]]
+    supported_sepa_formats: list[str]
+    tan_methods: TanMethodsSnapshot
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "bank_code": self.bank_code,
+            "server": self.server,
+            "bank_name": self.bank_name,
+            "supported_operations": self.supported_operations,
+            "supported_formats": self.supported_formats,
+            "supported_sepa_formats": self.supported_sepa_formats,
+            "tan_methods": self.tan_methods.to_dict(),
         }
 
 
@@ -452,7 +529,12 @@ class AccountSummaryResponseModel(BaseModel):
     bank_code: Optional[str]
     account_number: Optional[str]
     subaccount_number: Optional[str]
+    owner_name: Optional[str]
     bank_identifier: Optional[str]
+    product_name: Optional[str] = None
+    account_type: Optional[str] = None
+    account_type_code: Optional[str] = None
+    currency: Optional[str] = None
     balance: Optional[str] = None
     transaction_count: Optional[int] = None
     raw_repr: Optional[str] = None
@@ -474,6 +556,30 @@ class TransactionRecordResponseModel(BaseModel):
 class AccountTransactionsResponseModel(BaseModel):
     account: AccountSummaryResponseModel
     transactions: list[TransactionRecordResponseModel]
+
+
+class TanMethodResponseModel(BaseModel):
+    code: str
+    name: Optional[str]
+    security_function: Optional[str]
+    identifier: Optional[str]
+
+
+class TanMethodsSnapshotResponseModel(BaseModel):
+    current: Optional[str]
+    current_name: Optional[str]
+    methods: list[TanMethodResponseModel]
+    media: Optional[str] = None
+
+
+class BankInfoResponseModel(BaseModel):
+    bank_code: str
+    server: str
+    bank_name: Optional[str]
+    supported_operations: dict[str, bool]
+    supported_formats: dict[str, list[str]]
+    supported_sepa_formats: list[str]
+    tan_methods: TanMethodsSnapshotResponseModel
 
 
 class TanChallengeResponseModel(BaseModel):

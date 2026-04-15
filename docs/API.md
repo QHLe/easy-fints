@@ -48,6 +48,32 @@ Responses:
 - `409`: TAN required
 - `502`: FinTS/provider error
 
+### `POST /bank-info`
+
+Request body:
+
+```json
+{
+  "config": {
+    "bank": "<BLZ>",
+    "server": "https://...",
+    "product_id": "YOUR_PRODUCT_ID"
+  }
+}
+```
+
+Notes:
+
+- `bank` and `server` are required
+- `product_id` may come from request `config` or server environment
+- the endpoint uses an anonymous FinTS dialog, so no user or PIN is required
+
+Responses:
+
+- `200`: `BankInfo`
+- `400`: invalid or incomplete config
+- `502`: FinTS/provider error
+
 ### `POST /balance`
 
 Request body:
@@ -387,16 +413,55 @@ Session state values currently used by the API:
 
 ```json
 {
-  "label": "DE...",
+  "label": "Girokonto (DE...)",
   "iban": "DE...",
   "bic": "...",
   "bank_code": "...",
   "account_number": "...",
   "subaccount_number": null,
+  "owner_name": null,
   "bank_identifier": "...",
+  "product_name": "Girokonto",
+  "account_type": "Girokonto / Kontokorrentkonto",
+  "account_type_code": "1",
+  "currency": "EUR",
   "balance": "123.45",
   "transaction_count": 12,
   "raw_repr": "..."
+}
+```
+
+### `BankInfo`
+
+```json
+{
+  "bank_code": "12345678",
+  "server": "https://bank.example/fints",
+  "bank_name": "Testbank",
+  "supported_operations": {
+    "GET_SEPA_ACCOUNTS": true
+  },
+  "supported_formats": {
+    "SEPA_TRANSFER_SINGLE": [
+      "urn:iso:std:iso:20022:tech:xsd:pain.001.001.03"
+    ]
+  },
+  "supported_sepa_formats": [
+    "urn:iso:std:iso:20022:tech:xsd:pain.001.001.03"
+  ],
+  "tan_methods": {
+    "current": null,
+    "current_name": null,
+    "methods": [
+      {
+        "code": "942",
+        "name": "pushTAN",
+        "security_function": "942",
+        "identifier": "push"
+      }
+    ],
+    "media": null
+  }
 }
 ```
 
@@ -422,13 +487,18 @@ Session state values currently used by the API:
 ```json
 {
   "account": {
-    "label": "DE...",
+    "label": "Girokonto (DE...)",
     "iban": "DE...",
     "bic": "...",
     "bank_code": "...",
     "account_number": "...",
     "subaccount_number": null,
+    "owner_name": null,
     "bank_identifier": "...",
+    "product_name": "Girokonto",
+    "account_type": "Girokonto / Kontokorrentkonto",
+    "account_type_code": "1",
+    "currency": "EUR",
     "balance": null,
     "transaction_count": 2,
     "raw_repr": "..."

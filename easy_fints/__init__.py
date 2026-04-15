@@ -6,7 +6,7 @@ from importlib import import_module
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from .client import FinTSClient
+    from .client import FinTSClient, lookup_bank_info
     from .exceptions import (
         FinTSCapabilityError,
         FinTSConfigError,
@@ -18,6 +18,7 @@ if TYPE_CHECKING:
     from .models import (
         AccountSummary,
         AccountTransactions,
+        BankInfo,
         FinTSConfig,
         TanChallenge,
         TanMethod,
@@ -32,7 +33,9 @@ if TYPE_CHECKING:
 
 _EXPORT_MAP = {
     "FinTSClient": ("easy_fints.client", "FinTSClient"),
+    "lookup_bank_info": ("easy_fints.client", "lookup_bank_info"),
     "FinTS": ("easy_fints.service", "FinTS"),
+    "BankInfo": ("easy_fints.models", "BankInfo"),
     "FinTSConfig": ("easy_fints.models", "FinTSConfig"),
     "AccountSummary": ("easy_fints.models", "AccountSummary"),
     "AccountTransactions": ("easy_fints.models", "AccountTransactions"),

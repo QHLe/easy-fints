@@ -46,6 +46,7 @@ LOG_REDACT_KEYS = frozenset(
 LOG_MASKED_NAME_KEYS = frozenset(
     {
         "account_name",
+        "owner_name",
         "recipient_name",
         "counterparty_name",
         "close_match_name",
@@ -532,9 +533,13 @@ def bootstrap_client(
     return client
 
 
-def account_label(account: Any) -> str:
+def account_label(account: Any, *, product_name: Optional[str] = None) -> str:
+    normalized_product_name = str(product_name).strip() if product_name is not None else None
+    iban = getattr(account, "iban", None)
+    if normalized_product_name:
+        return f"{normalized_product_name} ({iban})" if iban else normalized_product_name
     return (
-        getattr(account, "iban", None)
+        iban
         or getattr(account, "account", None)
         or repr(account)
     )
@@ -593,6 +598,99 @@ def select_accounts(accounts: Iterable[Any], needle: Optional[str] = None) -> li
 
 def list_accounts(client: FinTS3PinTanClient) -> list[Any]:
     return list(client.get_sepa_accounts() or [])
+
+
+def translate_account_type(value: Any) -> Optional[str]:
+    if value in (None, ""):
+        return None
+    try:
+        code = int(str(value).strip())
+    except (TypeError, ValueError):
+        return str(value).strip() or None
+
+    if 1 <= code <= 9:
+        return "Girokonto / Kontokorrentkonto"
+    if 10 <= code <= 19:
+        return "Sparkonto"
+    if 20 <= code <= 29:
+        return "Festgeldkonto"
+    if 30 <= code <= 39:
+        return "Wertpapierdepot"
+    if 40 <= code <= 49:
+        return "Kredit- / Darlehenskonto"
+    if 50 <= code <= 59:
+        return "Kreditkartenkonto"
+    if 60 <= code <= 69:
+        return "Fondsdepot"
+    if 70 <= code <= 79:
+        return "Bausparvertrag"
+    if 80 <= code <= 89:
+        return "Versicherungsvertrag"
+    if 90 <= code <= 99:
+        return "Sonstiges Konto"
+    return f"Kontoart {code}"
+
+
+def list_account_information(client: FinTS3PinTanClient) -> list[dict[str, Any]]:
+    try:
+        information = client.get_information() or {}
+    except Exception:
+        return []
+    accounts = information.get("accounts")
+    return accounts if isinstance(accounts, list) else []
+
+
+def _account_bank_code(account: Any) -> Optional[str]:
+    return (
+        getattr(getattr(account, "bank_identifier", None), "bank_code", None)
+        or getattr(account, "blz", None)
+        or getattr(account, "bank_code", None)
+    )
+
+
+def _account_information_bank_code(account_information: dict[str, Any]) -> Optional[str]:
+    return (
+        getattr(account_information.get("bank_identifier"), "bank_code", None)
+        or account_information.get("bank_code")
+    )
+
+
+def match_account_information(account: Any, account_information: Iterable[dict[str, Any]]) -> Optional[dict[str, Any]]:
+    account_iban = getattr(account, "iban", None)
+    if account_iban:
+        normalized_account_iban = compact_iban(account_iban)
+        for candidate in account_information:
+            candidate_iban = candidate.get("iban")
+            if candidate_iban and compact_iban(candidate_iban) == normalized_account_iban:
+                return candidate
+
+    account_number = (
+        getattr(account, "accountnumber", None)
+        or getattr(account, "account_number", None)
+        or getattr(account, "account", None)
+    )
+    if not account_number:
+        return None
+
+    account_subaccount = getattr(account, "subaccount", None) or getattr(account, "subaccount_number", None)
+    account_bank_code = _account_bank_code(account)
+
+    for candidate in account_information:
+        candidate_account_number = candidate.get("account_number")
+        if candidate_account_number != account_number:
+            continue
+
+        candidate_bank_code = _account_information_bank_code(candidate)
+        if account_bank_code and candidate_bank_code and candidate_bank_code != account_bank_code:
+            continue
+
+        candidate_subaccount = candidate.get("subaccount_number")
+        if account_subaccount and candidate_subaccount and candidate_subaccount != account_subaccount:
+            continue
+
+        return candidate
+
+    return None
 
 
 def get_balance(client: FinTS3PinTanClient, account: Any) -> Any:

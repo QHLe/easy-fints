@@ -16,6 +16,7 @@ from fastapi.responses import JSONResponse
 from .client import (
     FinTSClient,
     looks_like_transfer_result,
+    lookup_bank_info,
 )
 from .diagnostics import summarize_last_bank_response
 from .exceptions import (
@@ -26,10 +27,11 @@ from .exceptions import (
     TanRequiredError,
     VOPRequiredError,
 )
-from .helpers import append_operation_step_log
+from .helpers import append_operation_step_log, load_config
 from .models import (
     AccountSummaryResponseModel,
     AccountTransactionsResponseModel,
+    BankInfoResponseModel,
     ConfirmationPendingResponseModel,
     FinTSErrorResponseModel,
     HealthResponseModel,
@@ -390,6 +392,47 @@ def _optional_iso_date(value: Any, field_name: str) -> dt.date | None:
             f"invalid {field_name}: expected YYYY-MM-DD",
             field=field_name,
         ) from exc
+
+
+@app.post(
+    "/bank-info",
+    response_model=BankInfoResponseModel,
+    responses={
+        400: {"model": ValidationErrorResponseModel, "description": "Invalid request payload"},
+        502: {"model": FinTSErrorResponseModel, "description": "FinTS/provider error"},
+    },
+)
+def bank_info(payload: dict[str, Any]):
+    cfg_overrides = dict(payload.get("config") or {})
+    bank = str(cfg_overrides.get("bank") or "").strip()
+    server = str(cfg_overrides.get("server") or "").strip()
+
+    if not bank:
+        return _validation_response(message="missing bank", field="bank", operation="bank_info")
+    if not server:
+        return _validation_response(message="missing server", field="server", operation="bank_info")
+
+    try:
+        cfg = load_config(overrides=cfg_overrides)
+    except Exception as exc:
+        return _validation_response(message=str(exc), operation="bank_info", code="config_error")
+
+    try:
+        result = lookup_bank_info(
+            bank=bank,
+            server=server,
+            product_id=str(cfg["product_id"]),
+            product_name=cfg.get("product_name"),
+            product_version=cfg.get("product_version"),
+        )
+        return result.to_dict()
+    except FinTSOperationError as exc:
+        return _session_response(
+            502,
+            error="fints_error",
+            operation=exc.operation,
+            message=exc.message,
+        )
 
 
 def _handle_client_operation(
