@@ -79,4 +79,4 @@ def test_resume_accounts_enriches_owner_name_and_subaccount_from_hiupd():
     assert accounts[0].account_type == "Girokonto / Kontokorrentkonto"
     assert accounts[0].account_type_code == "1"
     assert accounts[0].currency == "EUR"
-    assert accounts[0].label == "Girokonto (DE00123456780000000001)"
+    assert accounts[0].label == "Max Mustermann - Girokonto"

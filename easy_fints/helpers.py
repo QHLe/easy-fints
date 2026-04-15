@@ -533,11 +533,21 @@ def bootstrap_client(
     return client
 
 
-def account_label(account: Any, *, product_name: Optional[str] = None) -> str:
+def account_label(
+    account: Any,
+    *,
+    owner_name: Optional[str] = None,
+    product_name: Optional[str] = None,
+) -> str:
+    normalized_owner_name = str(owner_name).strip() if owner_name is not None else None
     normalized_product_name = str(product_name).strip() if product_name is not None else None
     iban = getattr(account, "iban", None)
+    if normalized_owner_name and normalized_product_name:
+        return f"{normalized_owner_name} - {normalized_product_name}"
+    if normalized_owner_name:
+        return normalized_owner_name
     if normalized_product_name:
-        return f"{normalized_product_name} ({iban})" if iban else normalized_product_name
+        return normalized_product_name
     return (
         iban
         or getattr(account, "account", None)

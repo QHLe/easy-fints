@@ -119,9 +119,14 @@ class AccountSummary:
             owner_parts = [owner_name_value.strip()] if owner_name_value.strip() else []
         else:
             owner_parts = [str(value).strip() for value in (owner_name_value or []) if str(value).strip()]
+        normalized_owner_name = " ".join(owner_parts) or None
         account_bank_identifier = account_info.get("bank_identifier")
         return cls(
-            label=account_label(account, product_name=normalized_product_name),
+            label=account_label(
+                account,
+                owner_name=normalized_owner_name,
+                product_name=normalized_product_name,
+            ),
             iban=getattr(account, "iban", None) or account_info.get("iban"),
             bic=getattr(account, "bic", None),
             bank_code=(
@@ -141,7 +146,7 @@ class AccountSummary:
                 or getattr(account, "subaccount_number", None)
                 or account_info.get("subaccount_number")
             ),
-            owner_name=" ".join(owner_parts) or None,
+            owner_name=normalized_owner_name,
             bank_identifier=(
                 getattr(account, "bank_identifier", None)
                 or getattr(account, "blz", None)

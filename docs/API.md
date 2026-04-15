@@ -413,7 +413,7 @@ Session state values currently used by the API:
 
 ```json
 {
-  "label": "Girokonto (DE...)",
+  "label": "Max Mustermann - Girokonto",
   "iban": "DE...",
   "bic": "...",
   "bank_code": "...",
@@ -487,7 +487,7 @@ Session state values currently used by the API:
 ```json
 {
   "account": {
-    "label": "Girokonto (DE...)",
+    "label": "Max Mustermann - Girokonto",
     "iban": "DE...",
     "bic": "...",
     "bank_code": "...",
