@@ -419,7 +419,7 @@ Session state values currently used by the API:
   "bank_code": "...",
   "account_number": "...",
   "subaccount_number": null,
-  "owner_name": null,
+  "owner_name": "Max Mustermann",
   "bank_identifier": "...",
   "product_name": "Girokonto",
   "account_type": "Girokonto / Kontokorrentkonto",
@@ -469,7 +469,7 @@ Session state values currently used by the API:
 
 ```json
 {
-  "account_label": "DE...",
+  "account_label": "Max Mustermann - Girokonto",
   "tx_index": 1,
   "booking_date": "2026-03-01",
   "value_date": "2026-03-01",
@@ -493,7 +493,7 @@ Session state values currently used by the API:
     "bank_code": "...",
     "account_number": "...",
     "subaccount_number": null,
-    "owner_name": null,
+    "owner_name": "Max Mustermann",
     "bank_identifier": "...",
     "product_name": "Girokonto",
     "account_type": "Girokonto / Kontokorrentkonto",
@@ -505,7 +505,7 @@ Session state values currently used by the API:
   },
   "transactions": [
     {
-      "account_label": "DE...",
+      "account_label": "Max Mustermann - Girokonto",
       "tx_index": 1,
       "booking_date": "2026-03-01",
       "value_date": "2026-03-01",
