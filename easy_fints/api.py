@@ -1,4 +1,4 @@
-"""FastAPI REST wrapper for python-fints."""
+"""FastAPI HTTP adapter for python-fints."""
 
 from __future__ import annotations
 

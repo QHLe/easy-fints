@@ -43,7 +43,7 @@ def test_service_builds_shared_client_with_product_id(monkeypatch):
         created.append(client)
         return client
 
-    monkeypatch.setattr("easy_fints.service.FinTSClient", fake_client)
+    monkeypatch.setattr("easy_fints.library.FinTSClient", fake_client)
 
     service = FinTS(
         product_id="demo-product",
@@ -81,7 +81,7 @@ def test_service_close_delegates_to_shared_client(monkeypatch):
         created.append(client)
         return client
 
-    monkeypatch.setattr("easy_fints.service.FinTSClient", fake_client)
+    monkeypatch.setattr("easy_fints.library.FinTSClient", fake_client)
 
     service = FinTS(
         product_id="demo-product",

@@ -1,4 +1,4 @@
-"""High-level service facade for library consumers."""
+"""Python-facing library facade."""
 
 from __future__ import annotations
 

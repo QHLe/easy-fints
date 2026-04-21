@@ -99,7 +99,7 @@ def test_start_uses_env_file_values(monkeypatch, tmp_path):
         os.sys.executable,
         "-m",
         "uvicorn",
-        "easy_fints.fastapi_app:app",
+        "easy_fints.api:app",
         "--host",
         "127.0.0.1",
         "--port",

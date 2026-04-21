@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from easy_fints import fastapi_app
+from easy_fints import api
 from easy_fints.client import _tan_methods_snapshot_from_low_level_client
 from easy_fints.models import BankInfo, TanMethod, TanMethodsSnapshot
 from tests.support.fake_fints_backend import unwrap_response
@@ -38,10 +38,10 @@ def test_bank_info_returns_bankwide_payload(monkeypatch):
             ),
         )
 
-    monkeypatch.setattr(fastapi_app, "lookup_bank_info", fake_lookup_bank_info)
+    monkeypatch.setattr(api, "lookup_bank_info", fake_lookup_bank_info)
 
     status_code, payload = unwrap_response(
-        fastapi_app.bank_info(
+        api.bank_info(
             {
                 "config": {
                     "bank": "12345678",
@@ -59,11 +59,11 @@ def test_bank_info_returns_bankwide_payload(monkeypatch):
 
 
 def test_bank_info_requires_bank_and_server():
-    status_code, payload = unwrap_response(fastapi_app.bank_info({"config": {"server": "https://bank.example/fints"}}))
+    status_code, payload = unwrap_response(api.bank_info({"config": {"server": "https://bank.example/fints"}}))
     assert status_code == 400
     assert payload["field"] == "bank"
 
-    status_code, payload = unwrap_response(fastapi_app.bank_info({"config": {"bank": "12345678"}}))
+    status_code, payload = unwrap_response(api.bank_info({"config": {"bank": "12345678"}}))
     assert status_code == 400
     assert payload["field"] == "server"
 

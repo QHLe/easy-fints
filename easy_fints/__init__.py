@@ -28,13 +28,13 @@ if TYPE_CHECKING:
         TransactionRecord,
         VOPChallenge,
     )
-    from .service import FinTS
+    from .library import FinTS
 
 
 _EXPORT_MAP = {
     "FinTSClient": ("easy_fints.client", "FinTSClient"),
     "lookup_bank_info": ("easy_fints.client", "lookup_bank_info"),
-    "FinTS": ("easy_fints.service", "FinTS"),
+    "FinTS": ("easy_fints.library", "FinTS"),
     "BankInfo": ("easy_fints.models", "BankInfo"),
     "FinTSConfig": ("easy_fints.models", "FinTSConfig"),
     "AccountSummary": ("easy_fints.models", "AccountSummary"),

@@ -19,4 +19,4 @@ RUN mkdir -p /app/logs
 
 EXPOSE 9686
 
-CMD ["uvicorn", "easy_fints.fastapi_app:app", "--host", "0.0.0.0", "--port", "9686"]
+CMD ["uvicorn", "easy_fints.api:app", "--host", "0.0.0.0", "--port", "9686"]
