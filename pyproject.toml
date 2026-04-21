@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "easy-fints"
-version = "1.4.0"
-description = "Python library and FastAPI wrapper around python-fints"
+version = "1.5.0"
+description = "Python library and FastAPI HTTP API adapter around python-fints"
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
