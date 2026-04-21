@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import datetime as dt
 
 from easy_fints import api
@@ -42,6 +43,25 @@ def test_shutdown_closes_active_clients(fake_backend):
     assert len(api.SESSIONS) == 2
 
     api.shutdown_active_sessions()
+
+    assert api.SESSIONS == {}
+    assert CREATED_CLIENTS
+    assert all(client.closed for client in CREATED_CLIENTS)
+
+
+def test_lifespan_shutdown_closes_active_clients(fake_backend):
+    async def run_lifespan() -> None:
+        async with api.app.router.lifespan_context(api.app):
+            accounts_status, _ = unwrap_response(api.accounts({"config": {"scenario": "accounts_tan"}}))
+            transfer_status, _ = unwrap_response(
+                api.transfer(make_transfer_payload(config={"scenario": "transfer_vop_approve"}))
+            )
+
+            assert accounts_status == 409
+            assert transfer_status == 409
+            assert len(api.SESSIONS) == 2
+
+    asyncio.run(run_lifespan())
 
     assert api.SESSIONS == {}
     assert CREATED_CLIENTS

@@ -527,6 +527,16 @@ class HealthResponseModel(BaseModel):
     status: str
 
 
+class ReadinessResponseModel(BaseModel):
+    status: str
+    operation: str
+    bank: str
+    server: str
+    reachable: bool
+    bank_name: Optional[str] = None
+    message: Optional[str] = None
+
+
 class AccountSummaryResponseModel(BaseModel):
     label: str
     iban: Optional[str]

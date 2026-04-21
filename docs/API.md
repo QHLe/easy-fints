@@ -26,6 +26,32 @@ Response:
 {"status":"ok"}
 ```
 
+### `POST /readiness`
+
+Request body:
+
+```json
+{
+  "config": {
+    "bank": "<BLZ>",
+    "server": "https://...",
+    "product_id": "YOUR_PRODUCT_ID"
+  }
+}
+```
+
+Notes:
+
+- `bank` and `server` are required
+- `product_id` may come from request `config` or server environment
+- the endpoint uses the same anonymous FinTS bootstrap as `/bank-info`, but returns a compact readiness result with `200` or `503`
+
+Responses:
+
+- `200`: bank endpoint reachable
+- `400`: invalid or incomplete config
+- `503`: configured bank endpoint not reachable
+
 ### `POST /accounts`
 
 Request body:
@@ -127,6 +153,12 @@ Responses:
 - `400`: invalid or incomplete config
 - `409`: TAN required
 - `502`: FinTS/provider error
+
+Operational note:
+
+- when investigating transaction normalization issues, the server can emit extra diagnostics with `FINTS_DEBUG_LEVEL` and `FINTS_DEBUG_FAIL_ONLY`
+- debug records are written to `logs/debug.log`
+- `record_raw` may include sensitive transaction payloads and should only be enabled for short-lived troubleshooting
 
 ### `POST /transfer`
 
@@ -260,6 +292,17 @@ Responses:
 - `422`: unsupported transfer product
 - `500`: unknown stored operation
 - `502`: FinTS/provider error
+
+## Internal Structure
+
+The canonical ASGI entry point is `easy_fints.api:app`.
+
+At a high level the package is split into:
+
+- `easy_fints/library.py` for Python consumers
+- `easy_fints/api.py` for HTTP requests and session orchestration
+- `easy_fints/client.py` as the stable public FinTS client facade
+- internal client modules such as `_client_runtime.py`, `_client_reads.py`, `_client_transfer.py`, and `_client_confirmation.py`
 
 For transfer sessions, the `409`/`202` confirmation responses and the final `200` transfer response can include the same structured `transfer_overview` payload:
 

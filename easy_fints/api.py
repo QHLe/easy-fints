@@ -6,7 +6,8 @@ import datetime as dt
 import logging
 import os
 import uuid
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
+from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -36,6 +37,7 @@ from .models import (
     FinTSErrorResponseModel,
     HealthResponseModel,
     NotFoundResponseModel,
+    ReadinessResponseModel,
     SessionCancelResponseModel,
     SessionInfoResponseModel,
     TanRequiredResponseModel,
@@ -47,7 +49,6 @@ from .models import (
 
 
 logger = logging.getLogger("pyfin_api")
-app = FastAPI()
 
 # In-memory operation sessions.
 SESSIONS: dict[str, dict[str, Any]] = {}
@@ -90,6 +91,15 @@ def _load_session_ttl_seconds() -> int:
 
 
 SESSION_TTL = _load_session_ttl_seconds()
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    yield
+    shutdown_active_sessions()
+
+
+app = FastAPI(lifespan=lifespan)
 
 
 def _session_response(status_code: int, **content: Any) -> JSONResponse:
@@ -362,7 +372,59 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
-@app.on_event("shutdown")
+@app.post(
+    "/readiness",
+    response_model=ReadinessResponseModel,
+    responses={
+        400: {"model": ValidationErrorResponseModel, "description": "Invalid request payload"},
+        503: {"model": ReadinessResponseModel, "description": "Configured bank endpoint is not reachable"},
+    },
+)
+def readiness(payload: dict[str, Any]):
+    cfg_overrides = dict(payload.get("config") or {})
+    bank = str(cfg_overrides.get("bank") or "").strip()
+    server = str(cfg_overrides.get("server") or "").strip()
+
+    if not bank:
+        return _validation_response(message="missing bank", field="bank", operation="readiness")
+    if not server:
+        return _validation_response(message="missing server", field="server", operation="readiness")
+
+    try:
+        cfg = load_config(overrides=cfg_overrides)
+    except Exception as exc:
+        return _validation_response(message=str(exc), operation="readiness", code="config_error")
+
+    try:
+        result = lookup_bank_info(
+            bank=bank,
+            server=server,
+            product_id=str(cfg["product_id"]),
+            product_name=cfg.get("product_name"),
+            product_version=cfg.get("product_version"),
+        )
+        return {
+            "status": "ready",
+            "operation": "readiness",
+            "bank": bank,
+            "server": server,
+            "reachable": True,
+            "bank_name": result.bank_name,
+            "message": "Anonymous FinTS bank-info probe succeeded",
+        }
+    except FinTSOperationError as exc:
+        return _session_response(
+            503,
+            status="not_ready",
+            operation="readiness",
+            bank=bank,
+            server=server,
+            reachable=False,
+            bank_name=None,
+            message=exc.message,
+        )
+
+
 def shutdown_active_sessions() -> None:
     session_ids = list(SESSIONS.keys())
     if session_ids:

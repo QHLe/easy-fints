@@ -1,6 +1,6 @@
 # easy-fints
 
-Python library with an optional FastAPI wrapper around `python-fints`.
+Python library with an optional FastAPI HTTP API adapter around `python-fints`.
 
 PyPI package:
 
@@ -12,6 +12,7 @@ Python import package:
 
 It currently supports:
 
+- anonymous bank info lookup
 - account listing
 - balances
 - transactions
@@ -158,6 +159,8 @@ Docker OpenAPI:
 Optional HTTP endpoints:
 
 - `GET /health`
+- `POST /readiness`
+- `POST /bank-info`
 - `POST /accounts`
 - `POST /balance`
 - `POST /transactions`
@@ -242,6 +245,7 @@ The repository includes small scripts for manual API testing:
 
 Library examples:
 
+- [`examples/bank_info_lib.py`](examples/bank_info_lib.py)
 - [`examples/accounts_lib.py`](examples/accounts_lib.py)
 - [`examples/balance_lib.py`](examples/balance_lib.py)
 - [`examples/transactions_lib.py`](examples/transactions_lib.py)
@@ -252,6 +256,7 @@ They use [`examples/lib_helper.py`](examples/lib_helper.py) and talk directly to
 
 REST API examples:
 
+- [`examples/bank_info_api.py`](examples/bank_info_api.py)
 - [`examples/accounts_api_tan.py`](examples/accounts_api_tan.py)
 - [`examples/balance_api_tan.py`](examples/balance_api_tan.py)
 - [`examples/transactions_api_tan.py`](examples/transactions_api_tan.py)
@@ -282,12 +287,25 @@ High-level testing/verification notes:
 
 ## Development
 
+Canonical entry points:
+
+- [`easy_fints/library.py`](easy_fints/library.py) for Python callers
+- [`easy_fints/api.py`](easy_fints/api.py) for the FastAPI/ASGI app
+
+Core internal layering:
+
+- [`easy_fints/client.py`](easy_fints/client.py) keeps the public `FinTSClient` facade stable
+- [`easy_fints/_client_runtime.py`](easy_fints/_client_runtime.py), [`easy_fints/_client_reads.py`](easy_fints/_client_reads.py), [`easy_fints/_client_transfer.py`](easy_fints/_client_transfer.py), and [`easy_fints/_client_confirmation.py`](easy_fints/_client_confirmation.py) split the main FinTS workflows by responsibility
+- [`easy_fints/transaction_mapping/`](easy_fints/transaction_mapping) contains the transaction normalization modules and debug source tracking
+
 Important files:
 
+- [`easy_fints/library.py`](easy_fints/library.py)
 - [`easy_fints/api.py`](easy_fints/api.py)
 - [`easy_fints/client.py`](easy_fints/client.py)
 - [`easy_fints/helpers.py`](easy_fints/helpers.py)
 - [`easy_fints/models.py`](easy_fints/models.py)
+- [`easy_fints/transaction_mapping/`](easy_fints/transaction_mapping)
 
 Basic checks:
 
@@ -364,3 +382,4 @@ Notes:
 - `summary` writes one compact entry per transaction fetch
 - `mapping` adds selected field sources and visible raw key names per record
 - `record_raw` also includes the raw transaction payload/representation and may contain sensitive bank data
+- normalization happens through the modules in [`easy_fints/transaction_mapping/`](easy_fints/transaction_mapping)

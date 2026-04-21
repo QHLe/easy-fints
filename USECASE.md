@@ -2,7 +2,7 @@
 
 ## Goal
 
-Track the high-level use cases for a simulated FinTS backend that can drive the REST wrapper without talking to a real bank.
+Track the high-level use cases for a simulated FinTS backend that can drive the HTTP API adapter without talking to a real bank.
 
 The simulated backend should help us verify:
 
@@ -11,6 +11,7 @@ The simulated backend should help us verify:
 - `/transfer` and `/confirm` flow control
 - TAN / decoupled / VoP handling
 - capability errors for unsupported transfer products
+- transaction normalization behavior for read flows
 - stable integration behavior across different software stacks
 
 ## Scope
@@ -20,7 +21,7 @@ This document tracks behavioral use cases, not the low-level implementation.
 The simulation should behave like a deterministic FinTS backend from the point of view of:
 
 - `FinTSClient`
-- FastAPI endpoints
+- FastAPI endpoints exposed via `easy_fints.api`
 - helper scripts
 - API consumers
 

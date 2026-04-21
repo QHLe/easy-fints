@@ -1,6 +1,6 @@
 # `POST /transfer` Workflow
 
-This document describes the end-to-end transfer flow implemented by the REST wrapper for SEPA credit transfers.
+This document describes the end-to-end transfer flow implemented by the HTTP API adapter for SEPA credit transfers.
 
 Key points:
 

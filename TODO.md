@@ -1,6 +1,6 @@
-# TODO — python-fints FastAPI wrapper
+# TODO — easy-fints HTTP API
 
-This file lists open points, suggested next steps, and decisions to make for the FastAPI wrapper around `python-fints`.
+This file lists open points, suggested next steps, and decisions to make for the HTTP API adapter around `python-fints`.
 
 Priority legend
 - High: must-have before exposing this to untrusted networks
@@ -20,9 +20,12 @@ Already implemented:
 - normalized unsupported transfer product errors for instant/scheduled transfer capability issues
 - structured `transfer_overview` payload in non-final transfer challenge responses and final `200` transfer responses
 - configurable session inactivity TTL via `FINTS_SESSION_TTL_SECONDS`
-- graceful shutdown closes active FinTS clients
+- graceful shutdown closes active FinTS clients via FastAPI lifespan handlers
+- request-driven `POST /readiness` probe for bank/server reachability via anonymous FinTS bank-info lookup
 - response models and OpenAPI-visible schemas for the main endpoints
 - manual TAN/VoP helper scripts and workflow documentation
+- transaction normalization through dedicated mapping modules under `easy_fints/transaction_mapping/`
+- opt-in transaction debug logging with `FINTS_DEBUG_LEVEL` and `FINTS_DEBUG_FAIL_ONLY`
 
 Not implemented yet:
 
@@ -38,14 +41,12 @@ Not implemented yet:
 
 ## Medium priority
 
-- Docker + docker-compose: provide a reference setup for local and CI testing.
 - Observability: structured logging, request IDs, and basic Prometheus metrics (request count, active sessions, TANs issued).
 
 
 ## Low priority / nice-to-have
 
 - Rate limiting per IP or API key.
-- Add a health/readiness probe that reflects ability to reach configured bank endpoints (optional separate check).
 
 
 ## Decisions / questions (need your input)
@@ -68,8 +69,4 @@ Not implemented yet:
   - Avoid persisting live FinTS dialog state, pending TAN objects, or raw client objects in central storage unless there is a very strong reason and compensating controls.
   - Keep the core API auth-free for easy integration, and prefer external protection layers such as network isolation, reverse proxy auth, mTLS, or VPN if deployment requires access control.
   - Enforce HTTPS, use short-lived sessions for TANs, and add rate-limiting where exposure warrants it.
-
-
-## Suggested next PRs (small, actionable)
-
-- PR 3: Keep deployment guidance focused on the simple single-process model unless a real scaling need appears.
+  - Treat `logs/debug.log` as sensitive when `FINTS_DEBUG_LEVEL=record_raw` is enabled.
