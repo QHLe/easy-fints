@@ -54,6 +54,8 @@ FINTS_PRODUCT_ID=YourProductID
 FINTS_PRODUCT_NAME=YourProductName
 FINTS_PRODUCT_VERSION=YourProductVersion
 FINTS_SESSION_TTL_SECONDS=300
+FINTS_DEBUG_LEVEL=off
+FINTS_DEBUG_FAIL_ONLY=0
 ```
 
 A FinTS product ID can be requested via the official registration page:
@@ -282,7 +284,7 @@ High-level testing/verification notes:
 
 Important files:
 
-- [`easy_fints/fastapi_app.py`](easy_fints/fastapi_app.py)
+- [`easy_fints/api.py`](easy_fints/api.py)
 - [`easy_fints/client.py`](easy_fints/client.py)
 - [`easy_fints/helpers.py`](easy_fints/helpers.py)
 - [`easy_fints/models.py`](easy_fints/models.py)
@@ -340,3 +342,25 @@ Recommended deployment style:
 Current limitation:
 
 - active confirmation sessions are in-memory and process-local, so the simplest supported runtime is a single API process
+
+## Debug Logging
+
+Optional transaction debugging can be enabled with environment variables:
+
+- `FINTS_DEBUG_LEVEL=off|summary|mapping|record_raw`
+- `FINTS_DEBUG_FAIL_ONLY=1` to emit debug output only when a transaction is missing dates or amount after normalization
+
+Debug entries are written to `logs/debug.log`.
+
+Recommended troubleshooting setup for normalization issues:
+
+```env
+FINTS_DEBUG_LEVEL=record_raw
+FINTS_DEBUG_FAIL_ONLY=1
+```
+
+Notes:
+
+- `summary` writes one compact entry per transaction fetch
+- `mapping` adds selected field sources and visible raw key names per record
+- `record_raw` also includes the raw transaction payload/representation and may contain sensitive bank data

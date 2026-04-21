@@ -7,6 +7,7 @@ import datetime as dt
 import json
 import logging
 import os
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Iterable, Optional, Union
 
@@ -14,6 +15,10 @@ import dotenv
 from fints.client import FinTS3PinTanClient, ING_BANK_IDENTIFIER, NeedTANResponse, NeedVOPResponse
 
 from .env_config import load_project_env
+from .transaction_mapping import (
+    normalize_transaction as normalize_transaction_via_modules,
+    transaction_debug_failure_reasons as transaction_debug_failure_reasons_via_modules,
+)
 
 load_project_env()
 
@@ -27,6 +32,12 @@ CONFIG_ENV_VARS = {
     "tan_mechanism_before_bootstrap": ("FINTS_TAN_MECHANISM_BEFORE_BOOTSTRAP",),
 }
 _RUNTIME_PATCHES_APPLIED = False
+DEBUG_LEVEL_RANK = {
+    "off": 0,
+    "summary": 1,
+    "mapping": 2,
+    "record_raw": 3,
+}
 SEPA_BASIC_ALLOWED_CHARS = frozenset(
     "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 /-?:().,'+"
 )
@@ -90,6 +101,16 @@ def _first_present(*values: Any) -> Any:
     return None
 
 
+def _first_present_with_source(*candidates: tuple[str, Any]) -> tuple[Any, Optional[str]]:
+    for source, value in candidates:
+        if value is None:
+            continue
+        if isinstance(value, str) and value == "":
+            continue
+        return (value, source)
+    return (None, None)
+
+
 def _env_value(*names: str) -> Optional[str]:
     for name in names:
         value = os.getenv(name)
@@ -104,6 +125,42 @@ def _field_names(env_names: Iterable[str]) -> str:
 
 def _as_bool(value: Any) -> bool:
     return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def fints_debug_level() -> str:
+    raw_value = str(os.getenv("FINTS_DEBUG_LEVEL", "off")).strip().lower().replace("-", "_")
+    aliases = {
+        "": "off",
+        "0": "off",
+        "false": "off",
+        "1": "summary",
+        "true": "summary",
+        "raw": "record_raw",
+    }
+    normalized = aliases.get(raw_value, raw_value)
+    if normalized in DEBUG_LEVEL_RANK:
+        return normalized
+    logger.warning("Invalid FINTS_DEBUG_LEVEL=%r, falling back to 'off'", raw_value)
+    return "off"
+
+
+def fints_debug_fail_only() -> bool:
+    return _as_bool(os.getenv("FINTS_DEBUG_FAIL_ONLY"))
+
+
+def fints_debug_enabled(level: str) -> bool:
+    requested_rank = DEBUG_LEVEL_RANK.get(level)
+    if requested_rank is None:
+        raise ValueError(f"Unknown debug level {level!r}")
+    return DEBUG_LEVEL_RANK[fints_debug_level()] >= requested_rank
+
+
+def should_emit_debug(level: str, *, failed: bool) -> bool:
+    if not fints_debug_enabled(level):
+        return False
+    if fints_debug_fail_only() and not failed:
+        return False
+    return True
 
 
 def load_config(
@@ -718,13 +775,65 @@ def transaction_start_date(days: int) -> dt.date:
 
 
 def _transaction_data(tx: Any) -> dict[str, Any]:
+    data = getattr(tx, "data", None)
+    if isinstance(data, dict):
+        return data
     data = getattr(tx, "__dict__", {}).get("data")
     return data if isinstance(data, dict) else {}
+
+
+def _json_log_value(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {str(key): _json_log_value(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_json_log_value(item) for item in value]
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if hasattr(value, "isoformat"):
+        try:
+            return value.isoformat()
+        except Exception:
+            pass
+    return str(value)
+
+
+def _data_value(data: dict[str, Any], *keys: str) -> Any:
+    for key in keys:
+        if key in data:
+            value = data[key]
+        else:
+            value: Any = data
+            for part in key.split("."):
+                if not isinstance(value, dict) or part not in value:
+                    value = None
+                    break
+                value = value[part]
+        if value is None:
+            continue
+        if isinstance(value, str) and value == "":
+            continue
+        return value
+    return None
 
 
 def normalize_amount(value: Any) -> tuple[Any, Any]:
     if value is None:
         return (None, None)
+    if isinstance(value, dict):
+        amount = _first_present(
+            value.get("amount"),
+            value.get("Amount"),
+            value.get("value"),
+            value.get("#text"),
+        )
+        currency = _first_present(
+            value.get("currency"),
+            value.get("Currency"),
+            value.get("Ccy"),
+            value.get("@Ccy"),
+        )
+        if amount is not None:
+            return (amount, currency)
     amount = getattr(value, "amount", None)
     currency = getattr(value, "currency", None)
     if amount is not None:
@@ -736,68 +845,41 @@ def normalize_amount(value: Any) -> tuple[Any, Any]:
     return (value, None)
 
 
-def normalize_transaction(tx: Any) -> dict[str, Any]:
-    data = _transaction_data(tx)
+def _apply_credit_debit_indicator(amount: Any, indicator: Any) -> Any:
+    if amount is None:
+        return None
+    normalized_indicator = str(indicator).strip().upper() if indicator is not None else ""
+    if normalized_indicator != "DBIT":
+        return amount
+    if isinstance(amount, str):
+        stripped = amount.strip()
+        if not stripped or stripped.startswith("-"):
+            return stripped or amount
+        if stripped.startswith("+"):
+            return f"-{stripped[1:]}"
+        return f"-{stripped}"
+    if isinstance(amount, Decimal):
+        return amount if amount <= 0 else -amount
+    if isinstance(amount, (int, float)):
+        return amount if amount <= 0 else -amount
+    try:
+        decimal_amount = Decimal(str(amount))
+    except (InvalidOperation, TypeError, ValueError):
+        return amount
+    if decimal_amount <= 0:
+        return amount
+    amount_text = str(amount).strip()
+    if amount_text.startswith("+"):
+        amount_text = amount_text[1:]
+    return f"-{amount_text}"
 
-    booking_date = _first_present(
-        getattr(tx, "booking_date", None),
-        getattr(tx, "date", None),
-        data.get("date"),
-        data.get("entry_date"),
-    )
-    value_date = _first_present(
-        getattr(tx, "value_date", None),
-        getattr(tx, "booking_date", None),
-        getattr(tx, "date", None),
-        data.get("entry_date"),
-        data.get("date"),
-    )
-    amount_value, amount_currency = normalize_amount(
-        _first_present(
-            getattr(tx, "amount", None),
-            getattr(tx, "transaction_amount", None),
-            getattr(tx, "value", None),
-            data.get("amount"),
-        )
-    )
 
-    return {
-        "booking_date": booking_date,
-        "value_date": value_date,
-        "amount": amount_value,
-        "currency": _first_present(
-            getattr(tx, "currency", None),
-            amount_currency,
-            data.get("currency"),
-        ),
-        "counterparty_name": _first_present(
-            getattr(tx, "counterparty_name", None),
-            getattr(tx, "name", None),
-            getattr(tx, "other_account_name", None),
-            getattr(tx, "recipient_name", None),
-            data.get("applicant_name"),
-            data.get("recipient_name"),
-        ),
-        "counterparty_iban": _first_present(
-            getattr(tx, "counterparty_iban", None),
-            getattr(tx, "iban", None),
-            getattr(tx, "account", None),
-            getattr(tx, "other_account", None),
-            data.get("applicant_iban"),
-            data.get("recipient_iban"),
-            data.get("applicant_bin"),
-        ),
-        "purpose": _first_present(
-            getattr(tx, "usage", None),
-            getattr(tx, "purpose", None),
-            getattr(tx, "text", None),
-            getattr(tx, "remittance_information", None),
-            data.get("purpose"),
-            data.get("additional_purpose"),
-            data.get("posting_text"),
-        ),
-        "raw": repr(tx),
-    }
+def transaction_debug_failure_reasons(row: dict[str, Any]) -> list[str]:
+    return transaction_debug_failure_reasons_via_modules(row)
+
+
+def normalize_transaction(tx: Any, *, include_debug: bool = False) -> dict[str, Any]:
+    return normalize_transaction_via_modules(tx, include_debug=include_debug)
 
 
 def parse_fints_raw_messages_log_text(text: str) -> list[dict[str, Any]]:
@@ -998,6 +1080,23 @@ def sanitize_log_payload(payload: dict[str, Any]) -> dict[str, Any]:
     return {key: _sanitize_log_value(str(key), value) for key, value in payload.items()}
 
 
+def append_debug_step_log(area: str, stage: str, payload: dict[str, Any]) -> Path:
+    """Append an unsanitized JSONL record for explicit debug diagnostics under `logs/`."""
+    log_dir = Path("logs")
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_path = log_dir / "debug.log"
+    record = {
+        "timestamp": dt.datetime.now(dt.timezone.utc).isoformat(),
+        "area": area,
+        "stage": stage,
+        **_json_log_value(payload),
+    }
+    with log_path.open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps(record, ensure_ascii=False))
+        fh.write("\n")
+    return log_path
+
+
 def append_operation_step_log(operation: str, stage: str, payload: dict[str, Any]) -> Path:
     """Append a step-level JSONL record for an operation under `logs/`."""
     log_dir = Path("logs")
@@ -1007,7 +1106,7 @@ def append_operation_step_log(operation: str, stage: str, payload: dict[str, Any
         "timestamp": dt.datetime.now(dt.timezone.utc).isoformat(),
         "operation": operation,
         "stage": stage,
-        **sanitize_log_payload(payload),
+        **_json_log_value(sanitize_log_payload(payload)),
     }
     with log_path.open("a", encoding="utf-8") as fh:
         fh.write(json.dumps(record, ensure_ascii=False))
