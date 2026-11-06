@@ -14,7 +14,7 @@ from .base import (
     transaction_debug_failure_reasons,
 )
 
-MAPPING_MODULES = (default, vr_camt)
+MAPPING_MODULES = (vr_camt, default)
 
 
 def normalize_transaction(tx: Any, *, include_debug: bool = False) -> dict[str, Any]:

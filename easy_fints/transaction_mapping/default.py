@@ -6,6 +6,7 @@ from .base import (
     MappingModuleResult,
     apply_credit_debit_indicator,
     data_value,
+    first_present_with_source,
     normalize_amount,
     tx_amount_candidate,
     tx_counterparty_iban_candidate,
@@ -24,14 +25,17 @@ def applies(data: dict[str, Any]) -> bool:
 
 
 def map_transaction(tx: Any, data: dict[str, Any]) -> MappingModuleResult:
-    booking_date, booking_date_source = tx_date_candidate(
-        data,
-        ("tx.booking_date", getattr(tx, "booking_date", None)),
-        ("tx.date", getattr(tx, "date", None)),
+    booking_candidate, booking_source = tx_date_candidate(
+        data, ("tx.booking_date", getattr(tx, "booking_date", None))
     )
-    value_date, value_date_source = tx_value_date_candidate(
-        data,
-        ("tx.value_date", getattr(tx, "value_date", None)),
+    booking_date, booking_date_source = first_present_with_source(
+        (booking_source, booking_candidate), ("tx.date", getattr(tx, "date", None))
+    )
+    value_candidate, value_source = tx_value_date_candidate(
+        data, ("tx.value_date", getattr(tx, "value_date", None))
+    )
+    value_date, value_date_source = first_present_with_source(
+        (value_source, value_candidate),
         ("tx.booking_date", getattr(tx, "booking_date", None)),
         ("tx.date", getattr(tx, "date", None)),
     )

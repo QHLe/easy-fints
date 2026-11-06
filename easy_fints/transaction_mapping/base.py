@@ -166,16 +166,20 @@ class MappingModuleResult:
 def tx_date_candidate(data: dict[str, Any], *extra: tuple[str, Any]) -> tuple[Any, Optional[str]]:
     return first_present_with_source(
         *extra,
-        ("data.date", data_value(data, "date")),
         ("data.entry_date", data_value(data, "entry_date")),
+        ("data.BookingDate.Date", data_value(data, "BookingDate.Date")),
+        ("data.date", data_value(data, "date")),
+        ("data.ValueDate.Date", data_value(data, "ValueDate.Date")),
     )
 
 
 def tx_value_date_candidate(data: dict[str, Any], *extra: tuple[str, Any]) -> tuple[Any, Optional[str]]:
     return first_present_with_source(
         *extra,
-        ("data.entry_date", data_value(data, "entry_date")),
         ("data.date", data_value(data, "date")),
+        ("data.ValueDate.Date", data_value(data, "ValueDate.Date")),
+        ("data.entry_date", data_value(data, "entry_date")),
+        ("data.BookingDate.Date", data_value(data, "BookingDate.Date")),
     )
 
 

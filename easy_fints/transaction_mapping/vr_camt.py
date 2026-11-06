@@ -37,7 +37,6 @@ def map_transaction(tx: Any, data: dict[str, Any]) -> MappingModuleResult:
     )
     value_date, value_date_source = first_present_with_source(
         ("data.ValueDate.Date", data_value(data, "ValueDate.Date")),
-        ("data.BookingDate.Date", data_value(data, "BookingDate.Date")),
     )
     raw_amount_value, amount_source = first_present_with_source(
         ("data.Amount", data_value(data, "Amount")),

@@ -75,14 +75,48 @@ def test_normalize_transaction_supports_fints_namedtuple_transaction():
 
     row = normalize_transaction(tx, include_debug=True)
 
-    assert row["booking_date"] == dt.date(2026, 4, 13)
-    assert row["value_date"] == dt.date(2026, 4, 13)
-    assert row["amount"] == Decimal("-12.00")
+    assert row["booking_date"] == "2026-04-13"
+    assert row["value_date"] == "2026-04-13"
+    assert row["amount"] == "-12.00"
     assert row["currency"] == "EUR"
     assert row["counterparty_name"] == "Ausgabe einer Debitkarte"
     assert row["counterparty_iban"] == "DE37604914300587682000"
     assert row["purpose"] == "Jahrespreis girocard"
     assert row["__debug__"]["raw_keys"]
-    assert row["__debug__"]["sources"]["booking_date"] == "default.data.date"
-    assert row["__debug__"]["sources"]["amount"] == "default.data.amount"
-    assert row["__debug__"]["applied_modules"] == ["default", "vr_camt"]
+    assert row["__debug__"]["sources"]["booking_date"] == "vr_camt.data.BookingDate.Date"
+    assert row["__debug__"]["sources"]["amount"] == "vr_camt.data.Amount"
+    assert row["__debug__"]["applied_modules"] == ["vr_camt", "default"]
+
+
+def test_normalize_transaction_assigns_distinct_fints_dates():
+    tx = Transaction(data={"date": dt.date(2026, 4, 11), "entry_date": dt.date(2026, 4, 13)})
+    row = normalize_transaction(tx, include_debug=True)
+    assert row["booking_date"] == dt.date(2026, 4, 13)
+    assert row["value_date"] == dt.date(2026, 4, 11)
+    assert row["__debug__"]["sources"]["booking_date"] == "default.data.entry_date"
+    assert row["__debug__"]["sources"]["value_date"] == "default.data.date"
+
+
+def test_normalize_transaction_prefers_camt_fields_over_generic_dates():
+    tx = Transaction(data={
+        "BookingDate.Date": "2026-04-13", "ValueDate.Date": "2026-04-11",
+        "date": dt.date(2026, 4, 11), "entry_date": dt.date(2026, 4, 13),
+    })
+    row = normalize_transaction(tx, include_debug=True)
+    assert row["booking_date"] == "2026-04-13"
+    assert row["value_date"] == "2026-04-11"
+    assert row["__debug__"]["sources"]["booking_date"] == "vr_camt.data.BookingDate.Date"
+
+
+def test_normalize_transaction_uses_available_value_date_before_booking_fallback():
+    tx = SimpleNamespace(booking_date="2026-04-13", data={"date": "2026-04-11"})
+    row = normalize_transaction(tx)
+    assert row["booking_date"] == "2026-04-13"
+    assert row["value_date"] == "2026-04-11"
+
+
+def test_camt_value_date_falls_back_to_generic_value_date_before_booking_date():
+    tx = SimpleNamespace(data={"BookingDate.Date": "2026-04-13", "date": "2026-04-11"})
+    row = normalize_transaction(tx)
+    assert row["booking_date"] == "2026-04-13"
+    assert row["value_date"] == "2026-04-11"
