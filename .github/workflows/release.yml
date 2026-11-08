@@ -73,10 +73,8 @@ jobs:
           generate_release_notes: true
           body: |
             Highlights:
-            - direct Python library usage via FinTS and FinTSClient
-            - account, balance, transaction, and transfer flows for library and REST usage
-            - TAN, decoupled confirmation, and VoP continuation flow
-            - examples, Docker packaging, and simulated backend test coverage
+            - Correct CAMT counterparty selection for credits, debits, and reversals
+            - Consistent MT940 counterparty IBAN and reversal amount parsing
+            - Regression coverage using parsed CAMT XML and MT940 statements
 
-            Note:
-            - active confirmation sessions are in-memory and process-local
+            Known upstream CAMT parser limitations are documented in VERIFICATION.md.

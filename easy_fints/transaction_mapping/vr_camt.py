@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from .base import (
@@ -7,7 +8,9 @@ from .base import (
     apply_credit_debit_indicator,
     data_value,
     first_present_with_source,
+    is_camt_reversal,
     normalize_amount,
+    tx_amount_candidate,
     tx_counterparty_iban_candidate,
     tx_counterparty_name_candidate,
     tx_purpose_candidate,
@@ -17,18 +20,8 @@ NAME = "vr_camt"
 
 
 def applies(data: dict[str, Any]) -> bool:
-    return bool(
-        data_value(
-            data,
-            "BookingDate.Date",
-            "ValueDate.Date",
-            "Amount",
-            "EntryDetails.TransactionDetails.Amount",
-            "EntryDetails.TransactionDetails.RelatedParties.Creditor.Party.Name",
-            "EntryDetails.TransactionDetails.RelatedParties.CreditorAccount.Identification.IBAN",
-            "CreditDebitIndicator",
-        )
-    )
+    camt_fields = ("BookingDate", "ValueDate", "Amount", "EntryDetails", "RelatedParties", "CreditDebitIndicator")
+    return any(key.split(".", 1)[0] in camt_fields for key in data)
 
 
 def map_transaction(tx: Any, data: dict[str, Any]) -> MappingModuleResult:
@@ -45,11 +38,23 @@ def map_transaction(tx: Any, data: dict[str, Any]) -> MappingModuleResult:
             data_value(data, "EntryDetails.TransactionDetails.Amount"),
         ),
     )
+    if raw_amount_value is None:
+        raw_amount_value, amount_source = tx_amount_candidate(tx, data)
     amount_value, amount_currency = normalize_amount(raw_amount_value)
-    amount_value = apply_credit_debit_indicator(
-        amount_value,
-        data_value(data, "CreditDebitIndicator", "EntryDetails.TransactionDetails.CreditDebitIndicator"),
-    )
+    indicator = str(
+        data_value(data, "CreditDebitIndicator", "EntryDetails.TransactionDetails.CreditDebitIndicator") or ""
+    ).strip().upper()
+    amount_value = apply_credit_debit_indicator(amount_value, indicator)
+    is_credit = indicator == "CRDT"
+    if not indicator and amount_value is not None:
+        try:
+            is_credit = Decimal(str(amount_value)) > 0
+        except (InvalidOperation, TypeError, ValueError):
+            pass
+    # Reversals retain the original parties while the entry's money flow reverses.
+    if is_camt_reversal(data):
+        is_credit = not is_credit
+    party = "Debtor" if is_credit else "Creditor"
     currency, currency_source = first_present_with_source(
         ("data.Currency", data_value(data, "Currency")),
         ("data.Amount.Ccy", data_value(data, "Amount.Ccy")),
@@ -72,45 +77,27 @@ def map_transaction(tx: Any, data: dict[str, Any]) -> MappingModuleResult:
     counterparty_name, counterparty_name_source = tx_counterparty_name_candidate(
         tx,
         data,
-        (
-            "data.EntryDetails.TransactionDetails.RelatedParties.Creditor.Party.Name",
-            data_value(data, "EntryDetails.TransactionDetails.RelatedParties.Creditor.Party.Name"),
+        *(
+            (f"data.{path}", data_value(data, path))
+            for path in (
+                f"EntryDetails.TransactionDetails.RelatedParties.{party}.Party.Name",
+                f"EntryDetails.TransactionDetails.RelatedParties.{party}.Name",
+                f"RelatedParties.{party}.Party.Name",
+                f"RelatedParties.{party}.Name",
+            )
         ),
-        (
-            "data.EntryDetails.TransactionDetails.RelatedParties.Debtor.Party.Name",
-            data_value(data, "EntryDetails.TransactionDetails.RelatedParties.Debtor.Party.Name"),
-        ),
-        ("data.RelatedParties.Creditor.Party.Name", data_value(data, "RelatedParties.Creditor.Party.Name")),
-        ("data.RelatedParties.Debtor.Party.Name", data_value(data, "RelatedParties.Debtor.Party.Name")),
-        ("data.RelatedParties.Creditor.Name", data_value(data, "RelatedParties.Creditor.Name")),
-        ("data.RelatedParties.Debtor.Name", data_value(data, "RelatedParties.Debtor.Name")),
     )
     counterparty_iban, counterparty_iban_source = tx_counterparty_iban_candidate(
         tx,
         data,
-        (
-            "data.EntryDetails.TransactionDetails.RelatedParties.CreditorAccount.Identification.IBAN",
-            data_value(data, "EntryDetails.TransactionDetails.RelatedParties.CreditorAccount.Identification.IBAN"),
-        ),
-        (
-            "data.EntryDetails.TransactionDetails.RelatedParties.DebtorAccount.Identification.IBAN",
-            data_value(data, "EntryDetails.TransactionDetails.RelatedParties.DebtorAccount.Identification.IBAN"),
-        ),
-        (
-            "data.RelatedParties.CreditorAccount.Identification.IBAN",
-            data_value(data, "RelatedParties.CreditorAccount.Identification.IBAN"),
-        ),
-        (
-            "data.RelatedParties.DebtorAccount.Identification.IBAN",
-            data_value(data, "RelatedParties.DebtorAccount.Identification.IBAN"),
-        ),
-        (
-            "data.EntryDetails.TransactionDetails.RelatedParties.CreditorAccount.IBAN",
-            data_value(data, "EntryDetails.TransactionDetails.RelatedParties.CreditorAccount.IBAN"),
-        ),
-        (
-            "data.EntryDetails.TransactionDetails.RelatedParties.DebtorAccount.IBAN",
-            data_value(data, "EntryDetails.TransactionDetails.RelatedParties.DebtorAccount.IBAN"),
+        *(
+            (f"data.{path}", data_value(data, path))
+            for path in (
+                f"EntryDetails.TransactionDetails.RelatedParties.{party}Account.Identification.IBAN",
+                f"RelatedParties.{party}Account.Identification.IBAN",
+                f"EntryDetails.TransactionDetails.RelatedParties.{party}Account.IBAN",
+                f"RelatedParties.{party}Account.IBAN",
+            )
         ),
     )
     purpose, purpose_source = tx_purpose_candidate(

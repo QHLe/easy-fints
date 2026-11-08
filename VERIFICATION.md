@@ -20,6 +20,8 @@ Live-bank runs should stay small and focused.
 Current automated baseline:
 
 - [`tests/test_helpers.py`](tests/test_helpers.py)
+- [`tests/test_vr_camt.py`](tests/test_vr_camt.py)
+- [`tests/test_transaction_parsing.py`](tests/test_transaction_parsing.py)
 - [`tests/test_debug_logging.py`](tests/test_debug_logging.py)
 - [`tests/test_api_readiness.py`](tests/test_api_readiness.py)
 - [`tests/test_api_read_flows.py`](tests/test_api_read_flows.py)
@@ -46,7 +48,26 @@ Examples:
 - transfer overview construction
 - unsupported transfer product normalization
 - transaction normalization across flat and nested CAMT-like payloads
+- raw CAMT report XML and MT940 text through the installed python-fints parsers and normalization
 - debug logging fail-only behavior and selected field-source capture
+
+The transaction parser checks cover counterparty names and IBANs, booking versus value dates,
+currency, amount signs, MT940 reversals and lowercase marks, and unstructured MT940 descriptions.
+CAMT checks include names with and without the `Party` wrapper, amount-based direction fallback,
+zero amounts, missing counterparties, and reversals. A CAMT reversal retains the original party
+roles while reversing the entry's direction, as described in the
+[SWIFT CGI guidance](https://www.swift.com/sites/default/files/files/swift_cgi-mp-wg2-iso-20022-camt.05x.001.08-best-practices-version1.1-2023-08.pdf).
+The MT940 adapter enables `applicant_iban`, `reversal_sign`, and `case_insensitive_marks`, requiring
+`mt-940>=5.1`; see the [parser's compatibility options](https://mt940.readthedocs.io/en/latest/compatibility.html).
+
+The audit also reproduced these limitations in python-fints 5.0.1 before normalization. They remain
+upstream parser limitations; the mapper changes do not resolve them:
+
+- Multiple `TxDtls` within one CAMT entry produce one aggregate record with the last transaction's
+  party details. For example, two payments totaling 24.68 were attributed to the second sender.
+- A CAMT.053 document using `BkToCstmrStmt/Stmt` raises `IndexError`, because the parser requires
+  `Rpt/Acct/Ccy`.
+- A booking date supplied as `BookgDt/DtTm` raises `KeyError: BookingDate.Date`.
 
 ### Simulated integration verification
 

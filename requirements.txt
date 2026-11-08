@@ -1,5 +1,6 @@
 fastapi
 uvicorn[standard]
 fints
+mt-940>=5.1
 Markdown
 python-dotenv

@@ -206,6 +206,7 @@ def apply_runtime_patches() -> None:
     _patch_ing_two_step_tan()
     _patch_retry_detection()
     _patch_balance_conversions()
+    _patch_mt940_parser()
     _RUNTIME_PATCHES_APPLIED = True
 
 
@@ -286,6 +287,26 @@ def _patch_balance_conversions() -> None:
         fints_formals.Balance1.as_mt940_Balance = _safe_balance1
     if orig_b2:
         fints_formals.Balance2.as_mt940_Balance = _safe_balance2
+
+
+def _patch_mt940_parser() -> None:
+    import fints.client as fints_client
+    import fints.utils as fints_utils
+    import mt940
+
+    options = mt940.Options(
+        applicant_iban=True,
+        reversal_sign=True,
+        case_insensitive_marks=True,
+    )
+
+    def _parse_mt940(data: str) -> list[Any]:
+        # Keep python-fints' transport substitutions before parsing.
+        data = data.replace("@@", "\r\n").replace("-0000", "+0000")
+        return mt940.models.Transactions(options=options).parse(data)
+
+    fints_utils.mt940_to_array = _parse_mt940
+    fints_client.mt940_to_array = _parse_mt940
 
 
 def _select_two_step_tan_mechanism(

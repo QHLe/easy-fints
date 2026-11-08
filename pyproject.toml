@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "easy-fints"
-version = "1.5.1"
+version = "1.5.2"
 description = "Python library and FastAPI HTTP API adapter around python-fints"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -24,6 +24,7 @@ dependencies = [
   "fastapi",
   "uvicorn[standard]",
   "fints",
+  "mt-940>=5.1",
   "Markdown",
   "python-dotenv",
 ]

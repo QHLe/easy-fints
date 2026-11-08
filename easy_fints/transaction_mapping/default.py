@@ -41,10 +41,12 @@ def map_transaction(tx: Any, data: dict[str, Any]) -> MappingModuleResult:
     )
     raw_amount_value, amount_source = tx_amount_candidate(tx, data)
     amount_value, amount_currency = normalize_amount(raw_amount_value)
-    amount_value = apply_credit_debit_indicator(
-        amount_value,
-        data_value(data, "CreditDebitIndicator", "EntryDetails.TransactionDetails.CreditDebitIndicator"),
-    )
+    indicator = data_value(data, "CreditDebitIndicator", "EntryDetails.TransactionDetails.CreditDebitIndicator")
+    if indicator is None or not str(indicator).strip():
+        # MT940 reverses the meaning of C/D when prefixed with R.
+        status = str(data_value(data, "status") or "").strip().upper()
+        indicator = {"C": "CRDT", "D": "DBIT", "RC": "DBIT", "RD": "CRDT"}.get(status)
+    amount_value = apply_credit_debit_indicator(amount_value, indicator)
     currency, currency_source = tx_currency_candidate(tx, amount_currency, data)
     counterparty_name, counterparty_name_source = tx_counterparty_name_candidate(tx, data)
     counterparty_iban, counterparty_iban_source = tx_counterparty_iban_candidate(tx, data)

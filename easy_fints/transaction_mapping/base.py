@@ -73,6 +73,11 @@ def json_compatible(value: Any) -> Any:
     return str(value)
 
 
+def is_camt_reversal(data: dict[str, Any]) -> bool:
+    indicator = data_value(data, "ReversalIndicator", "EntryDetails.TransactionDetails.ReversalIndicator")
+    return str(indicator).strip().lower() in {"true", "1"}
+
+
 def normalize_amount(value: Any) -> tuple[Any, Any]:
     if value is None:
         return (None, None)
@@ -106,29 +111,26 @@ def apply_credit_debit_indicator(amount: Any, indicator: Any) -> Any:
     if amount is None:
         return None
     normalized_indicator = str(indicator).strip().upper() if indicator is not None else ""
-    if normalized_indicator != "DBIT":
+    if normalized_indicator not in {"CRDT", "DBIT"}:
         return amount
+    is_debit = normalized_indicator == "DBIT"
     if isinstance(amount, str):
         stripped = amount.strip()
-        if not stripped or stripped.startswith("-"):
-            return stripped or amount
-        if stripped.startswith("+"):
-            return f"-{stripped[1:]}"
-        return f"-{stripped}"
+        if not stripped:
+            return amount
+        magnitude = stripped[1:] if stripped.startswith(("+", "-")) else stripped
+        return f"-{magnitude}" if is_debit else magnitude
     if isinstance(amount, Decimal):
-        return amount if amount <= 0 else -amount
+        magnitude = amount.copy_abs()
+        return magnitude.copy_negate() if is_debit else magnitude
     if isinstance(amount, (int, float)):
-        return amount if amount <= 0 else -amount
+        magnitude = abs(amount)
+        return -magnitude if is_debit else magnitude
     try:
-        decimal_amount = Decimal(str(amount))
+        Decimal(str(amount))
     except (InvalidOperation, TypeError, ValueError):
         return amount
-    if decimal_amount <= 0:
-        return amount
-    amount_text = str(amount).strip()
-    if amount_text.startswith("+"):
-        amount_text = amount_text[1:]
-    return f"-{amount_text}"
+    return apply_credit_debit_indicator(str(amount), normalized_indicator)
 
 
 def empty_transaction_row(tx: Any) -> dict[str, Any]:
@@ -209,8 +211,8 @@ def tx_counterparty_name_candidate(tx: Any, data: dict[str, Any], *extra: tuple[
         ("tx.other_account_name", getattr(tx, "other_account_name", None)),
         ("tx.recipient_name", getattr(tx, "recipient_name", None)),
         *extra,
-        ("data.applicant_name", data_value(data, "applicant_name")),
-        ("data.recipient_name", data_value(data, "recipient_name")),
+        # python-fints derives applicant_* from direction without considering reversals.
+        ("data.applicant_name", None if is_camt_reversal(data) else data_value(data, "applicant_name")),
     )
 
 
@@ -221,9 +223,8 @@ def tx_counterparty_iban_candidate(tx: Any, data: dict[str, Any], *extra: tuple[
         ("tx.account", getattr(tx, "account", None)),
         ("tx.other_account", getattr(tx, "other_account", None)),
         *extra,
-        ("data.applicant_iban", data_value(data, "applicant_iban")),
-        ("data.recipient_iban", data_value(data, "recipient_iban")),
-        ("data.applicant_bin", data_value(data, "applicant_bin")),
+        ("data.applicant_iban", None if is_camt_reversal(data) else data_value(data, "applicant_iban")),
+        ("data.gvc_applicant_iban", data_value(data, "gvc_applicant_iban")),
     )
 
 
@@ -236,5 +237,6 @@ def tx_purpose_candidate(tx: Any, data: dict[str, Any], *extra: tuple[str, Any])
         *extra,
         ("data.purpose", data_value(data, "purpose")),
         ("data.additional_purpose", data_value(data, "additional_purpose")),
+        ("data.transaction_details", data_value(data, "transaction_details")),
         ("data.posting_text", data_value(data, "posting_text")),
     )
